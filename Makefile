@@ -341,6 +341,10 @@ validate-helm-charts: check-helm ## Render all Helm charts with helm template (n
 		$(if $(REGISTRY),--set hyperfleet-adapter.image.registry=$(REGISTRY)) \
 		$(if $(ADAPTER_REPOSITORY),--set hyperfleet-adapter.image.repository=$(ADAPTER_REPOSITORY)) \
 		--set hyperfleet-adapter.image.tag=$(ADAPTER_IMAGE_TAG) \
+		$(if $(filter rabbitmq,$(BROKER_TYPE)),--set hyperfleet-adapter.broker.rabbitmq.url=amqp://stub:5672/ \
+			--set hyperfleet-adapter.broker.rabbitmq.queue=validate-adapter1 \
+			--set hyperfleet-adapter.broker.rabbitmq.exchange=validate-clusters \
+			--set 'hyperfleet-adapter.broker.rabbitmq.routingKey=\#') \
 		--set-file hyperfleet-adapter.adapterConfig.yaml=$(HELM_DIR)/adapter1/adapter-config.yaml \
 		--set-file hyperfleet-adapter.adapterTaskConfig.yaml=$(HELM_DIR)/adapter1/adapter-task-config.yaml)
 
@@ -349,6 +353,10 @@ validate-helm-charts: check-helm ## Render all Helm charts with helm template (n
 		$(if $(REGISTRY),--set hyperfleet-adapter.image.registry=$(REGISTRY)) \
 		$(if $(ADAPTER_REPOSITORY),--set hyperfleet-adapter.image.repository=$(ADAPTER_REPOSITORY)) \
 		--set hyperfleet-adapter.image.tag=$(ADAPTER_IMAGE_TAG) \
+		$(if $(filter rabbitmq,$(BROKER_TYPE)),--set hyperfleet-adapter.broker.rabbitmq.url=amqp://stub:5672/ \
+			--set hyperfleet-adapter.broker.rabbitmq.queue=validate-adapter2 \
+			--set hyperfleet-adapter.broker.rabbitmq.exchange=validate-clusters \
+			--set 'hyperfleet-adapter.broker.rabbitmq.routingKey=\#') \
 		--set-file hyperfleet-adapter.adapterConfig.yaml=$(HELM_DIR)/adapter2/adapter-config.yaml \
 		--set-file hyperfleet-adapter.adapterTaskConfig.yaml=$(HELM_DIR)/adapter2/adapter-task-config.yaml)
 
@@ -357,6 +365,10 @@ validate-helm-charts: check-helm ## Render all Helm charts with helm template (n
 		$(if $(REGISTRY),--set hyperfleet-adapter.image.registry=$(REGISTRY)) \
 		$(if $(ADAPTER_REPOSITORY),--set hyperfleet-adapter.image.repository=$(ADAPTER_REPOSITORY)) \
 		--set hyperfleet-adapter.image.tag=$(ADAPTER_IMAGE_TAG) \
+		$(if $(filter rabbitmq,$(BROKER_TYPE)),--set hyperfleet-adapter.broker.rabbitmq.url=amqp://stub:5672/ \
+			--set hyperfleet-adapter.broker.rabbitmq.queue=validate-adapter3 \
+			--set hyperfleet-adapter.broker.rabbitmq.exchange=validate-nodepools \
+			--set 'hyperfleet-adapter.broker.rabbitmq.routingKey=\#') \
 		--set-file hyperfleet-adapter.adapterConfig.yaml=$(HELM_DIR)/adapter3/adapter-config.yaml \
 		--set-file hyperfleet-adapter.adapterTaskConfig.yaml=$(HELM_DIR)/adapter3/adapter-task-config.yaml)
 
