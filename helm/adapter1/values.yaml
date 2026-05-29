@@ -34,7 +34,7 @@ hyperfleet-adapter:
     rabbitmq:
       # make install will substitute this by data coming from tf-helm-values.sh
       url: CHANGE_ME
-      queue: ""
+      queue: CHANGE_ME
       exchange: ""
       routingKey: ""
 
