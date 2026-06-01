@@ -33,7 +33,7 @@ Run `make help` for all targets. Use these for validation:
 **Pre-commit order:**
 
 ```bash
-make fmt                                    # auto-fix terraform formatting
+cd terraform && terraform fmt -recursive     # auto-fix terraform formatting
 make ci-dry-run                             # full offline validation
 ```
 
@@ -49,7 +49,6 @@ make ci-dry-run                             # full offline validation
 | Helm values generation logic | `scripts/tf-helm-values.sh` |
 | Chart dependencies and sources | `helm/*/Chart.yaml` |
 | Terraform version pin | `.tool-versions` |
-| Pre-commit hooks (commit msg format enforced) | `.pre-commit-config.yaml` |
 | Repo structure and quick start | `README.md` |
 
 ## Two Deployment Paths
