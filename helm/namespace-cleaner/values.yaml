@@ -10,7 +10,7 @@ schedule: "0 * * * *"
 
 # Space-separated label selectors used to identify namespaces eligible for deletion.
 # Each selector is matched independently (OR semantics).
-labelSelector: "hyperfleet.io/cluster-id hyperfleet.io/test-run"
+labelSelector: "hyperfleet.io/cluster-id hyperfleet.io/test-run e2e.hyperfleet.io/run-id"
 
 # Delete namespaces older than this many minutes
 ageMinutes: 180

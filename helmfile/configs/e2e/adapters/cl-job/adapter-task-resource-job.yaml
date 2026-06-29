@@ -7,12 +7,16 @@ metadata:
   labels:
     hyperfleet.io/cluster-id: "{{ .clusterId }}"
     hyperfleet.io/resource-type: "job"
+    e2e.hyperfleet.io/run-id: "{{ .runId }}"
     app: test-job
   annotations:
     hyperfleet.io/generation: "{{ .generationSpec }}"
 spec:
   backoffLimit: 0
   template:
+    metadata:
+      labels:
+        e2e.hyperfleet.io/run-id: "{{ .runId }}"
     spec:
       restartPolicy: Never
       containers:

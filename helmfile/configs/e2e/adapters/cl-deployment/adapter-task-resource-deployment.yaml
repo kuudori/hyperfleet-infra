@@ -7,6 +7,7 @@ metadata:
   labels:
     hyperfleet.io/cluster-id: "{{ .clusterId }}"
     hyperfleet.io/resource-type: "deployment"
+    e2e.hyperfleet.io/run-id: "{{ .runId }}"
   annotations:
     hyperfleet.io/generation: "{{ .generationSpec }}"
 spec:
@@ -15,11 +16,13 @@ spec:
     matchLabels:
       app: test
       hyperfleet.io/cluster-id: "{{ .clusterId }}"
+      e2e.hyperfleet.io/run-id: "{{ .runId }}"
   template:
     metadata:
       labels:
         app: test
         hyperfleet.io/cluster-id: "{{ .clusterId }}"
+        e2e.hyperfleet.io/run-id: "{{ .runId }}"
     spec:
       containers:
         - name: test
