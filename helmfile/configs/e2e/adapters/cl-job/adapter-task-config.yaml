@@ -6,6 +6,10 @@ params:
     source: "event.id"
     type: "string"
     required: true
+  - name: "runId"
+    source: "env.RUN_ID"
+    type: "string"
+    required: true
 
 # Preconditions with valid operators and CEL expressions
 preconditions:

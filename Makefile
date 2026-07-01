@@ -41,7 +41,7 @@ KUBECONFIG ?= $(HOME)/.kube/config
 
 CLEANER_NAMESPACE    ?= $(NAMESPACE)
 CLEANER_SCHEDULE     ?= 0 * * * *
-CLEANER_LABEL_SELECTOR ?= hyperfleet.io/cluster-id hyperfleet.io/test-run
+CLEANER_LABEL_SELECTOR ?= hyperfleet.io/cluster-id hyperfleet.io/test-run e2e/hyperfleet.io/run-id
 CLEANER_AGE_MINUTES  ?= 180
 CLEANER_MAESTRO_URL  ?= http://maestro.$(MAESTRO_NAMESPACE).svc.cluster.local:8000
 

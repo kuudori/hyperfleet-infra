@@ -6,6 +6,7 @@ image:
   tag: {{ env "ADAPTER_IMAGE_TAG" | default "dev" }}
   pullPolicy: {{ env "IMAGE_PULL_POLICY" | default "IfNotPresent" }}
 
+
 adapterConfig:
   log:
     level: debug
@@ -30,3 +31,7 @@ env:
     valueFrom:
       fieldRef:
         fieldPath: metadata.namespace
+  {{- if .Values.runId }}
+  - name: RUN_ID
+    value: {{ .Values.runId | quote }}
+  {{ end }}

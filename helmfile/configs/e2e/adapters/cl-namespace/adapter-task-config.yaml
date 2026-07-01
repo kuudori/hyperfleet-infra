@@ -6,16 +6,15 @@ params:
     source: "event.id"
     type: "string"
     required: true
-  - name: "testRunId"
-    source: "env.TEST_RUN_ID"
-    type: "string"
-    required: false
-    default: "TEST_RUN_ID"
   - name: "ci"
     source: "env.CI"
     type: "string"
     required: false
     default: "false"
+  - name: "runId"
+    source: "env.RUN_ID"
+    type: "string"
+    required: true
 
 # Preconditions with valid operators and CEL expressions
 preconditions:
@@ -64,9 +63,9 @@ resources:
         labels:
           hyperfleet.io/cluster-id: "{{ .clusterId }}"
           hyperfleet.io/cluster-name: "{{ .clusterName }}"
-          e2e.hyperfleet.io/test-run-id: "{{ .testRunId }}"
           e2e.hyperfleet.io/ci: "{{ .ci }}"
           e2e.hyperfleet.io/managed-by: "test-framework"
+          e2e.hyperfleet.io/run-id: "{{ .runId }}"
         annotations:
           hyperfleet.io/generation: "{{ .generationSpec }}"
     discovery:
