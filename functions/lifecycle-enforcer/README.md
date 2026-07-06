@@ -123,23 +123,23 @@ terraform apply
 
 ### Rollout
 
-1. Deploy with `lifecycle_enforcer_dry_run = true` (default) — logs all actions without executing
+1. Run `terraform apply` in `terraform/shared/` — the enforcer is active by default (`lifecycle_enforcer_dry_run = false`)
 2. Check logs in Cloud Logging:
    ```text
    resource.type="cloud_run_revision"
    resource.labels.service_name="lifecycle-enforcer"
    ```
-3. Add TTL labels to existing clusters:
+3. Add TTL labels to existing clusters that don't have one yet:
    ```bash
    DRY_RUN=false make add-ttl-labels
    ```
-4. When confident, set `lifecycle_enforcer_dry_run = false` in `terraform/shared/` and re-apply
+4. To temporarily disable enforcement without destroying infrastructure, set `lifecycle_enforcer_dry_run = true` and re-apply
 
 ### Configuration (shared module variables)
 
 | Variable                      | Default     | Description                                   |
 | ----------------------------- | ----------- | --------------------------------------------- |
-| `lifecycle_enforcer_dry_run`  | `true`      | Log actions without executing                 |
+| `lifecycle_enforcer_dry_run`  | `false`     | Set to `true` to log actions without executing |
 | `lifecycle_enforcer_schedule` | `0 * * * *` | Cloud Scheduler cron expression (hourly)      |
 
 ### Environment variables (Cloud Function)
@@ -147,7 +147,7 @@ terraform apply
 | Variable         | Default          | Description                                   |
 | ---------------- | ---------------- | --------------------------------------------- |
 | `PROJECT_ID`     | *(required)*     | GCP project to scan for clusters              |
-| `DRY_RUN`        | `true`           | Set to `false` to execute enforcement actions |
+| `DRY_RUN`        | `false`          | Set to `true` to disable enforcement actions  |
 
 ## Development
 

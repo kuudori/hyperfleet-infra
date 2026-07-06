@@ -17,7 +17,7 @@ variable "schedule" {
 variable "dry_run" {
   description = "Enable dry-run mode (logs actions without executing them)"
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "source_dir" {

@@ -16,6 +16,8 @@ This Terraform configuration creates the shared networking infrastructure that a
 | Firewall | `hyperfleet-dev-vpc-allow-iap-ssh` | Allow SSH via Identity-Aware Proxy |
 | Cloud Router | `hyperfleet-dev-vpc-router` | Required for Cloud NAT |
 | Cloud NAT | `hyperfleet-dev-vpc-nat` | Internet access for private nodes |
+| Cloud Function | `lifecycle-enforcer` | Hourly cluster lifecycle enforcement |
+| Cloud Scheduler | `lifecycle-enforcer-trigger` | Triggers lifecycle enforcer every hour |
 
 ## Prerequisites
 
@@ -118,6 +120,8 @@ The defaults should work for most cases, but you can customize via variables:
 | `subnet_cidr` | Subnet CIDR | `10.100.0.0/16` |
 | `pods_cidr` | Pods secondary range | `10.101.0.0/16` |
 | `services_cidr` | Services secondary range | `10.102.0.0/16` |
+| `lifecycle_enforcer_dry_run` | Log actions without executing | `false` |
+| `lifecycle_enforcer_schedule` | Cron schedule for enforcement | `0 * * * *` |
 
 ## Troubleshooting
 
