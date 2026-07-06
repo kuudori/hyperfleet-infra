@@ -84,9 +84,9 @@ Configuration precedence (highest to lowest):
 | `make install-sentinels` | Install Sentinels only |
 | `make install-adapters` | Install Adapters only |
 | `make uninstall-hyperfleet` | Uninstall all HyperFleet components |
-| `make uninstall-hyperfleet-api` | Uninstall API only |
-| `make uninstall-hyperfleet-sentinels` | Uninstall Sentinels only |
-| `make uninstall-hyperfleet-adapters` | Uninstall Adapters only |
+| `make uninstall-api` | Uninstall API only |
+| `make uninstall-sentinels` | Uninstall Sentinels only |
+| `make uninstall-adapters` | Uninstall Adapters only |
 
 ### Terraform
 
@@ -149,7 +149,7 @@ Configuration precedence (highest to lowest):
 | `make ci-cleanup` | `uninstall-maestro` + `destroy-terraform` |
 
 
-## Variables
+## Environment Variables
 
 | Variable | GCP default | kind default | Notes |
 |----------|------------|--------------|-------|
@@ -171,14 +171,29 @@ Configuration precedence (highest to lowest):
 | `TF_ENV` | `dev` | N/A | Selects `envs/gke/<TF_ENV>.tfvars` |
 | `RABBITMQ_URL` | N/A | `amqp://guest:guest@rabbitmq:5672` | |
 | `MAESTRO_CONSUMER` | `cluster1` | `cluster1` | |
-| `KIND_CLUSTER_NAME` | N/A | `kind` | |
-| `PROJECTS_DIR` | N/A | `~/openshift-hyperfleet` | Parent dir for sibling repos (image builds) |
-| BUILD_IMAGES | N/A | true | Set to false to skip image builds |
 | `CLEANER_NAMESPACE` | `$(NAMESPACE)` | `$(NAMESPACE)` | Namespace to install the cleaner into |
 | `CLEANER_SCHEDULE` | `0 * * * *` | `0 * * * *` | Cron schedule for the cleaner job |
 | `CLEANER_LABEL_SELECTOR` | `hyperfleet.io/cluster-id` | `hyperfleet.io/cluster-id` | Label selector to identify orphan namespaces |
 | `CLEANER_AGE_MINUTES` | `180` | `180` | Minimum age (minutes) before a namespace is eligible for cleanup |
 | `CLEANER_MAESTRO_URL` | `http://maestro.$(MAESTRO_NAMESPACE).svc.cluster.local:8000` | `http://maestro.$(MAESTRO_NAMESPACE).svc.cluster.local:8000` | Maestro API URL used by the cleaner |
+
+### E2E specific variables
+Variables only needed for e2e environments (HELMFILE_ENV=e2e-gcp/e2e-kind).
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RUN_ID` | `NAMESPACE` | The runId for the e2e environment |
+
+### Kind specific variables
+Variables only needed for kind environments (HELMFILE_ENV=kind/e2e-kind).
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PROJECTS_DIR` |`~/openshift-hyperfleet` | Parent dir for sibling repos (image builds) |
+| `BUILD_IMAGES` | true | Set to false to skip image builds |
+| `KIND_CLUSTER_NAME` | `kind` | The name of the kind cluster |
+
+
 
 ## Repository Structure
 

@@ -232,16 +232,16 @@ install-adapters: check-helmfile-env ## Install Hyperfleet Adapters
 uninstall-hyperfleet: check-kubectl-context ## Uninstall all HyperFleet components
 	helmfile -f helmfile/helmfile.yaml.gotmpl -e $(HELMFILE_ENV) destroy
 
-.PHONY: uninstall-hyperfleet-api
-uninstall-hyperfleet-api: check-kubectl-context ## Uninstall Hyperfleet API
+.PHONY: uninstall-api
+uninstall-api: check-kubectl-context ## Uninstall Hyperfleet API
 	helmfile -f helmfile/helmfile.yaml.gotmpl -e $(HELMFILE_ENV) -l component=api destroy
 
-.PHONY: uninstall-hyperfleet-sentinels
-uninstall-hyperfleet-sentinels: check-kubectl-context ## Uninstall Hyperfleet Sentinels
+.PHONY: uninstall-sentinels
+uninstall-sentinels: check-kubectl-context ## Uninstall Hyperfleet Sentinels
 	helmfile -f helmfile/helmfile.yaml.gotmpl -e $(HELMFILE_ENV) -l component=sentinel destroy
 
-.PHONY: uninstall-hyperfleet-adapters
-uninstall-hyperfleet-adapters: check-kubectl-context ## Uninstall Hyperfleet Adapters
+.PHONY: uninstall-adapters
+uninstall-adapters: check-kubectl-context ## Uninstall Hyperfleet Adapters
 	helmfile -f helmfile/helmfile.yaml.gotmpl -e $(HELMFILE_ENV) -l component=adapter destroy
 
 
@@ -512,4 +512,4 @@ local-down-kind: uninstall-hyperfleet uninstall-maestro delete-kind-cluster ## T
 local-up-gcp: install-terraform get-credentials install-priority-classes install-maestro-all install-hyperfleet ## Full gke setup (cluster + maestro + hyperfleet)
 
 .PHONY: local-down-gcp
-local-down-gcp: get-credentials uninstall-maestro uninstall-hyperfleet destroy-terraform ## Tear down gke: (cluster + maestro + hyperfleet)
+local-down-gcp: get-credentials uninstall-maestro uninstall-hyperfleet destroy-terraform ## Tear down gke (cluster + maestro + hyperfleet)
