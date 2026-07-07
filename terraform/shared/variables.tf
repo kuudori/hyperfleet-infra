@@ -40,7 +40,7 @@ variable "services_cidr" {
 variable "lifecycle_enforcer_dry_run" {
   description = "Run lifecycle enforcer in dry-run mode (logs actions without executing)"
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "lifecycle_enforcer_schedule" {
