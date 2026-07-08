@@ -15,35 +15,43 @@ params:
     source: "env.NAMESPACE"
     type: "string"
 
+  - name: "clusterStatus"
+    source:
+      api_call:
+        method: "GET"
+        url: "/clusters/{{ .clusterId }}"
+        timeout: 10s
+        retry_attempts: 3
+        retry_backoff: "exponential"
+
+  - name: "clusterName"
+    source: "clusterStatus.name"
+
+  - name: "generation"
+    source: "clusterStatus.generation"
+
+  - name: "is_deleting"
+    source:
+      expression: "clusterStatus.?deleted_time.hasValue()"
+
+  - name: "clusterNotReconciled"
+    source:
+      expression: |
+        clusterStatus.?status.?conditions.orValue([]).filter(c, c.type == "Reconciled").size() > 0
+          ? clusterStatus.?status.?conditions.orValue([]).filter(c, c.type == "Reconciled")[0].status != "True"
+          : true
+
+  - name: "clusterReconciledTTL"
+    source:
+      expression: |
+        (timestamp(now()) - timestamp(
+          clusterStatus.?status.?conditions.orValue([]).filter(c, c.type == "Reconciled").size() > 0
+            ? clusterStatus.?status.?conditions.orValue([]).filter(c, c.type == "Reconciled")[0].last_transition_time
+            : now()
+        )).getSeconds() > 300
+
 # Preconditions with valid operators and CEL expressions
 preconditions:
-  - name: "clusterStatus"
-    api_call:
-      method: "GET"
-      url: "/clusters/{{ .clusterId }}"
-      timeout: 10s
-      retry_attempts: 3
-      retry_backoff: "exponential"
-    capture:
-      - name: "clusterName"
-        field: "name"
-      - name: "generation"
-        field: "generation"
-      - name: "is_deleting"
-        expression: "clusterStatus.?deleted_time.hasValue()"
-      - name: "clusterNotReconciled"
-        expression: |
-          status.conditions.filter(c, c.type == "Reconciled").size() > 0
-            ? status.conditions.filter(c, c.type == "Reconciled")[0].status != "True"
-            : true
-      - name: "clusterReconciledTTL"
-        expression: |
-          (timestamp(now()) - timestamp(
-            status.conditions.filter(c, c.type == "Reconciled").size() > 0
-              ? status.conditions.filter(c, c.type == "Reconciled")[0].last_transition_time
-              : now()
-          )).getSeconds() > 300
-
   - name: "validationCheck"
     # Precondition passes if cluster is NOT Reconciled OR if cluster is Reconciled and stable for >300 seconds since last transition (enables self-healing) OR if cluster is being deleted
     expression: |

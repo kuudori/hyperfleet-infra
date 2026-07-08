@@ -5,7 +5,7 @@ params:
     source: "event.id"
     type: "string"
     required: true
-    
+
   - name: "clusterId"
     source: "event.owner_references.id"
     type: "string"
@@ -20,35 +20,43 @@ params:
     source: "env.NAMESPACE"
     type: "string"
 
+  - name: "nodepoolStatus"
+    source:
+      api_call:
+        method: "GET"
+        url: "/clusters/{{ .clusterId }}/nodepools/{{ .nodepoolId }}"
+        timeout: 10s
+        retry_attempts: 3
+        retry_backoff: "exponential"
+
+  - name: "nodepoolName"
+    source: "nodepoolStatus.name"
+
+  - name: "observedGeneration"
+    source: "nodepoolStatus.generation"
+
+  - name: "is_deleting"
+    source:
+      expression: "nodepoolStatus.?deleted_time.hasValue()"
+
+  - name: "nodepoolNotReconciled"
+    source:
+      expression: |
+        nodepoolStatus.?status.?conditions.orValue([]).filter(c, c.type == "Reconciled").size() > 0
+          ? nodepoolStatus.?status.?conditions.orValue([]).filter(c, c.type == "Reconciled")[0].status != "True"
+          : true
+
+  - name: "nodepoolReconciledTTL"
+    source:
+      expression: |
+        (timestamp(now()) - timestamp(
+          nodepoolStatus.?status.?conditions.orValue([]).filter(c, c.type == "Reconciled").size() > 0
+            ? nodepoolStatus.?status.?conditions.orValue([]).filter(c, c.type == "Reconciled")[0].last_transition_time
+            : now()
+        )).getSeconds() > 300
+
 # Preconditions with valid operators and CEL expressions
 preconditions:
-  - name: "nodepoolStatus"
-    api_call:
-      method: "GET"
-      url: "/clusters/{{ .clusterId }}/nodepools/{{ .nodepoolId }}"
-      timeout: 10s
-      retry_attempts: 3
-      retry_backoff: "exponential"
-    capture:
-      - name: "nodepoolName"
-        field: "name"
-      - name: "observedGeneration"
-        field: "generation"
-      - name: "is_deleting"
-        expression: "nodepoolStatus.?deleted_time.hasValue()"
-      - name: "nodepoolNotReconciled"
-        expression: |
-          status.conditions.filter(c, c.type == "Reconciled").size() > 0
-            ? status.conditions.filter(c, c.type == "Reconciled")[0].status != "True"
-            : true
-      - name: "nodepoolReconciledTTL"
-        expression: |
-          (timestamp(now()) - timestamp(
-            status.conditions.filter(c, c.type == "Reconciled").size() > 0
-              ? status.conditions.filter(c, c.type == "Reconciled")[0].last_transition_time
-              : now()
-          )).getSeconds() > 300
-
   - name: "validationCheck"
     # Precondition passes if nodepool is NOT Reconciled OR if nodepool is Reconciled and stable for >300 seconds since last transition (enables self-healing) OR if nodepool is being deleted
     expression: |

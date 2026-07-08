@@ -11,46 +11,61 @@ params:
     type: "string"
     required: true
 
-# Preconditions with valid operators and CEL expressions
-preconditions:
   - name: "clusterStatus"
-    api_call:
-      method: "GET"
-      url: "/clusters/{{ .clusterId }}"
-      timeout: 10s
-      retry_attempts: 3
-      retry_backoff: "exponential"
-    capture:
-      - name: "clusterName"
-        field: "name"
-      - name: "generationSpec"
-        field: "generation"
-      - name: "is_deleting"
-        expression: "has(clusterStatus.deleted_time)"
-      - name: "clusterNotReconciled"
-        expression: |
-          status.conditions.filter(c, c.type == "Reconciled").size() > 0
-            ? status.conditions.filter(c, c.type == "Reconciled")[0].status != "True"
-            : true
-      - name: "clusterReconciledTTL"
-        expression: |
-          (timestamp(now()) - timestamp(
-            status.conditions.filter(c, c.type == "Reconciled").size() > 0
-              ? status.conditions.filter(c, c.type == "Reconciled")[0].last_transition_time
-              : now()
-          )).getSeconds() > 300
+    source:
+      api_call:
+        method: "GET"
+        url: "/clusters/{{ .clusterId }}"
+        timeout: 10s
+        retry_attempts: 3
+        retry_backoff: "exponential"
+
+  - name: "clusterName"
+    source: "clusterStatus.name"
+
+  - name: "generationSpec"
+    source: "clusterStatus.generation"
+
+  - name: "is_deleting"
+    source:
+      expression: "clusterStatus.?deleted_time.hasValue()"
+
+  - name: "clusterNotReconciled"
+    source:
+      expression: |
+        clusterStatus.?status.?conditions.orValue([]).filter(c, c.type == "Reconciled").size() > 0
+          ? clusterStatus.?status.?conditions.orValue([]).filter(c, c.type == "Reconciled")[0].status != "True"
+          : true
+
+  - name: "clusterReconciledTTL"
+    source:
+      expression: |
+        (timestamp(now()) - timestamp(
+          clusterStatus.?status.?conditions.orValue([]).filter(c, c.type == "Reconciled").size() > 0
+            ? clusterStatus.?status.?conditions.orValue([]).filter(c, c.type == "Reconciled")[0].last_transition_time
+            : now()
+        )).getSeconds() > 300
 
   - name: "clusterAdapterStatus"
-    api_call:
-      method: "GET"
-      url: "/clusters/{{ .clusterId }}/statuses"
-      timeout: 10s
-      retry_attempts: 3
-      retry_backoff: "exponential"
-    capture:
-      - name: "clusterJobStatus"
-        field: "{.items[?(@.adapter=='cl-job')].conditions[?(@.type=='Available')].status}"
+    source:
+      api_call:
+        method: "GET"
+        url: "/clusters/{{ .clusterId }}/statuses"
+        timeout: 10s
+        retry_attempts: 3
+        retry_backoff: "exponential"
 
+  - name: "clusterJobStatus"
+    source:
+      expression: |
+        clusterAdapterStatus.?items.orValue([]).filter(item, item.adapter == "cl-job").size() > 0
+          ? (clusterAdapterStatus.items.filter(item, item.adapter == "cl-job")[0].?conditions.orValue([]).filter(c, c.type == "Available").size() > 0
+              ? clusterAdapterStatus.items.filter(item, item.adapter == "cl-job")[0].conditions.filter(c, c.type == "Available")[0].status
+              : "")
+          : ""
+
+# Preconditions with valid operators and CEL expressions
+preconditions:
   - name: "validationCheck"
     expression: |
       is_deleting || (clusterJobStatus == "True" && (clusterNotReconciled || clusterReconciledTTL))

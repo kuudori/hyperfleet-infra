@@ -22,41 +22,51 @@ params:
     type: "string"
     required: true
 
+  - name: "clusterStatus"
+    source:
+      api_call:
+        method: "GET"
+        url: "/clusters/{{ .clusterId }}"
+        timeout: 10s
+        retry_attempts: 3
+        retry_backoff: "exponential"
+
+  - name: "clusterName"
+    source: "clusterStatus.name"
+
+  - name: "generation"
+    source: "clusterStatus.generation"
+
+  - name: "timestamp"
+    source: "clusterStatus.created_time"
+
+  - name: "is_deleting"
+    source:
+      expression: "clusterStatus.?deleted_time.hasValue()"
+
+  - name: "reconciledConditionStatus"
+    source:
+      expression: |
+        clusterStatus.?status.?conditions.orValue([]).filter(c, c.type == "Reconciled").size() > 0
+          ? clusterStatus.?status.?conditions.orValue([]).filter(c, c.type == "Reconciled")[0].status
+          : "False"
+
+  - name: "placementClusterName"
+    source:
+      expression: "\"cluster1\""  # TBC coming from placement adapter
+
+  - name: "platformType"
+    source:
+      expression: |
+        clusterStatus.?spec.?platform.?type.orValue("")
+
+  - name: "subnets"
+    source:
+      expression: |
+        clusterStatus.?spec.?platform.?gcp.?subnets.orValue([])
+
 # Preconditions with valid operators and CEL expressions
 preconditions:
-  - name: "clusterStatus"
-    api_call:
-      method: "GET"
-      url: "/clusters/{{ .clusterId }}"
-      timeout: 10s
-      retry_attempts: 3
-      retry_backoff: "exponential"
-    capture:
-      - name: "clusterName"
-        field: "name"
-      - name: "generation"
-        field: "generation"
-      - name: "timestamp"
-        field: "created_time"
-      - name: "is_deleting"
-        expression: "has(clusterStatus.deleted_time)"
-      - name: "reconciledConditionStatus"
-        expression: |
-          status.conditions.filter(c, c.type == "Reconciled").size() > 0
-            ? status.conditions.filter(c, c.type == "Reconciled")[0].status
-            : "False"
-      - name: "placementClusterName"
-        expression: "\"cluster1\""  # TBC coming from placement adapter
-      - name: "platformType"
-        expression: |
-          has(spec.platform) && has(spec.platform.type) ? spec.platform.type : ""
-      - name: "subnets"
-        expression: |
-          has(spec.platform) && has(spec.platform.gcp) && has(spec.platform.gcp.subnets)
-            ? spec.platform.gcp.subnets
-            : []
-
-
   - name: "validationCheck"
     expression: |
       is_deleting || reconciledConditionStatus == "False"

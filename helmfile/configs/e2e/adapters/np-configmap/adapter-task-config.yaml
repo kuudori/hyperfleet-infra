@@ -15,46 +15,59 @@ params:
     type: "string"
     required: true
 
-# Preconditions with valid operators and CEL expressions
-preconditions:
   - name: "nodepoolStatus"
-    api_call:
-      method: "GET"
-      url: "/clusters/{{ .clusterId }}/nodepools/{{ .nodepoolId }}"
-      timeout: 10s
-      retry_attempts: 3
-      retry_backoff: "exponential"
-    capture:
-      - name: "nodepoolName"
-        field: "name"
-      - name: "generationSpec"
-        field: "generation"
-      - name: "is_deleting"
-        expression: "has(nodepoolStatus.deleted_time)"
-      - name: "nodepoolNotReconciled"
-        expression: |
-          status.conditions.filter(c, c.type == "Reconciled").size() > 0
-            ? status.conditions.filter(c, c.type == "Reconciled")[0].status != "True"
-            : true
-      - name: "nodepoolReconciledTTL"
-        expression: |
-          (timestamp(now()) - timestamp(
-            status.conditions.filter(c, c.type == "Reconciled").size() > 0
-              ? status.conditions.filter(c, c.type == "Reconciled")[0].last_transition_time
-              : now()
-          )).getSeconds() > 300
+    source:
+      api_call:
+        method: "GET"
+        url: "/clusters/{{ .clusterId }}/nodepools/{{ .nodepoolId }}"
+        timeout: 10s
+        retry_attempts: 3
+        retry_backoff: "exponential"
+
+  - name: "nodepoolName"
+    source: "nodepoolStatus.name"
+
+  - name: "generationSpec"
+    source: "nodepoolStatus.generation"
+
+  - name: "is_deleting"
+    source:
+      expression: "nodepoolStatus.?deleted_time.hasValue()"
+
+  - name: "nodepoolNotReconciled"
+    source:
+      expression: |
+        nodepoolStatus.?status.?conditions.orValue([]).filter(c, c.type == "Reconciled").size() > 0
+          ? nodepoolStatus.?status.?conditions.orValue([]).filter(c, c.type == "Reconciled")[0].status != "True"
+          : true
+
+  - name: "nodepoolReconciledTTL"
+    source:
+      expression: |
+        (timestamp(now()) - timestamp(
+          nodepoolStatus.?status.?conditions.orValue([]).filter(c, c.type == "Reconciled").size() > 0
+            ? nodepoolStatus.?status.?conditions.orValue([]).filter(c, c.type == "Reconciled")[0].last_transition_time
+            : now()
+        )).getSeconds() > 300
 
   - name: "clusterAdapterStatus"
-    api_call:
-      method: "GET"
-      url: "/clusters/{{ .clusterId }}/statuses"
-      timeout: 10s
-      retry_attempts: 3
-      retry_backoff: "exponential"
-    capture:
-      - name: "clusterNamespaceStatus"
-        field: "{.items[?(@.adapter=='cl-namespace')].data.namespace.status}"
+    source:
+      api_call:
+        method: "GET"
+        url: "/clusters/{{ .clusterId }}/statuses"
+        timeout: 10s
+        retry_attempts: 3
+        retry_backoff: "exponential"
 
+  - name: "clusterNamespaceStatus"
+    source:
+      expression: |
+        clusterAdapterStatus.?items.orValue([]).filter(item, item.adapter == "cl-namespace").size() > 0
+          ? clusterAdapterStatus.items.filter(item, item.adapter == "cl-namespace")[0].data.namespace.status
+          : ""
+
+# Preconditions with valid operators and CEL expressions
+preconditions:
   - name: "validationCheck"
     # Precondition passes if deleting OR (namespace active AND (nodepool not reconciled OR reconciled TTL expired))
     expression: |
