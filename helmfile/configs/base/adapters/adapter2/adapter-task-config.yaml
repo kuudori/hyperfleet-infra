@@ -15,38 +15,41 @@ params:
     source: "env.NAMESPACE"
     type: "string"
 
+  - name: "clusterStatus"
+    source:
+      api_call:
+        method: "GET"
+        url: "/clusters/{{ .clusterId }}"
+        timeout: 10s
+        retry_attempts: 3
+        retry_backoff: "exponential"
+
+  - name: "clusterName"
+    source: "clusterStatus.name"
+
+  - name: "generation"
+    source: "clusterStatus.generation"
+
+  - name: "timestamp"
+    source: "clusterStatus.created_time"
+
+  - name: "is_deleting"
+    source:
+      expression: "clusterStatus.?deleted_time.hasValue()"
+
+  - name: "reconciledConditionStatus"
+    source:
+      expression: |
+        clusterStatus.?status.?conditions.orValue([]).filter(c, c.type == "Reconciled").size() > 0
+          ? clusterStatus.?status.?conditions.orValue([]).filter(c, c.type == "Reconciled")[0].status
+          : "False"
+
+  - name: "placementClusterName"
+    source:
+      expression: "\"cluster1\""  # TBC coming from placement adapter
+
 # Preconditions with valid operators and CEL expressions
 preconditions:
-  - name: "clusterStatus"
-    api_call:
-      method: "GET"
-      url: "/clusters/{{ .clusterId }}"
-      timeout: 10s
-      retry_attempts: 3
-      retry_backoff: "exponential"
-    capture:
-      - name: "clusterName"
-        field: "name"
-      - name: "generation"
-        field: "generation"
-      - name: "timestamp"
-        field: "created_time"
-      - name: "is_deleting"
-        expression: "clusterStatus.?deleted_time.hasValue()"
-      - name: "reconciledConditionStatus"
-        expression: |
-          status.conditions.filter(c, c.type == "Reconciled").size() > 0
-            ? status.conditions.filter(c, c.type == "Reconciled")[0].status
-            : "False"
-      - name: "placementClusterName"
-        expression: "\"cluster1\""  # TBC coming from placement adapter
-
-    # Structured conditions with valid operators
-    conditions:
-      - field: "reconciledConditionStatus"
-        operator: "equals"
-        value: "False"
-
   - name: "validationCheck"
     # Precondition passes if cluster is NOT Reconciled (reconciledConditionStatus == "False") OR if cluster is being deleted
     # Note: Unlike adapter1/adapter3, this adapter does not implement self-healing TTL checks
