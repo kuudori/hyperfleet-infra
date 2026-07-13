@@ -29,8 +29,8 @@ config:
     jwt:
       enabled: true
       configs:
-        - issuer_url: {{ env "OIDC_ISSUER_URL" }}
-          jwk_cert_url: {{ env "OIDC_JWKS_URL" }}
+        - issuer_url: {{ requiredEnv "OIDC_ISSUER_URL" }}
+          jwk_cert_url: {{ requiredEnv "OIDC_JWKS_URL" }}
           audience: hyperfleet-api
           identity_claim: sub
         - issuer_url: https://accounts.google.com
