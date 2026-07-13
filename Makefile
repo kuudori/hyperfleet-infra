@@ -9,6 +9,7 @@ HELMFILE_ENV ?= gcp
 ifeq ($(findstring gcp,$(HELMFILE_ENV)),)
 	-include env.kind
 else
+	-include generated-values-from-terraform/oidc.env
 	-include env.gcp
 endif
 
@@ -213,11 +214,11 @@ install-repos: check-helmfile-env ## Add all hyperfleet helm repos
 	$(call add-helm-repo,adapter,$(ADAPTER_CHART_REF))
 
 .PHONY: install-hyperfleet
-install-hyperfleet: check-helmfile-env check-hyperfleet-namespace ## Install all HyperFleet components
+install-hyperfleet: check-helmfile-env check-hyperfleet-namespace check-jwt-config ## Install all HyperFleet components
 	helmfile -f helmfile/helmfile.yaml.gotmpl -e $(HELMFILE_ENV) apply
 
 .PHONY: install-api
-install-api: check-helmfile-env ## Install HyperFleet API
+install-api: check-helmfile-env check-jwt-config ## Install HyperFleet API
 	helmfile apply -f helmfile/helmfile.yaml.gotmpl -e $(HELMFILE_ENV) -l component=api
 
 .PHONY: install-sentinels
@@ -354,6 +355,21 @@ define check-namespace
 	@kubectl get namespace $(1) >/dev/null 2>&1 || kubectl create namespace $(1) || { echo "ERROR: failed to create namespace $(1)"; exit 1; }
 	@echo "OK: namespace $(1) ready"
 endef
+
+.PHONY: check-jwt-config
+check-jwt-config: ## Validate OIDC variables when JWT_AUTH_ENABLED=true; no-op otherwise
+	@if [ "$(JWT_AUTH_ENABLED)" = "true" ]; then \
+		if [ -z "$(OIDC_ISSUER_URL)" ]; then \
+			echo "ERROR: JWT_AUTH_ENABLED=true but OIDC_ISSUER_URL is not set."; \
+			echo "       Run 'make install-terraform' to populate it automatically, or pass it on the CLI."; \
+			exit 1; \
+		fi; \
+		echo "$(OIDC_ISSUER_URL)" | grep -q "^https://" \
+			|| { echo "ERROR: OIDC_ISSUER_URL must start with https:// (got: $(OIDC_ISSUER_URL))"; exit 1; }; \
+		echo "$(OIDC_JWKS_URL)" | grep -q "^https://" \
+			|| { echo "ERROR: OIDC_JWKS_URL must start with https:// (got: $(OIDC_JWKS_URL))"; exit 1; }; \
+		echo "OK: JWT auth config validated (OIDC_ISSUER_URL=$(OIDC_ISSUER_URL))"; \
+	fi
 
 .PHONY: check-hyperfleet-namespace
 check-hyperfleet-namespace: ## Create Hyperfleet namespace if it doesn't exist and label it

@@ -177,6 +177,41 @@ Configuration precedence (highest to lowest):
 | `CLEANER_AGE_MINUTES` | `180` | `180` | Minimum age (minutes) before a namespace is eligible for cleanup |
 | `CLEANER_MAESTRO_URL` | `http://maestro.$(MAESTRO_NAMESPACE).svc.cluster.local:8000` | `http://maestro.$(MAESTRO_NAMESPACE).svc.cluster.local:8000` | Maestro API URL used by the cleaner |
 
+### GCP JWT Authentication (optional)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `JWT_AUTH_ENABLED` | `false` | Set to `true` to enable JWT validation on the API and SA-token auth on sentinel/adapter |
+| `OIDC_ISSUER_URL` | *(from Terraform output)* | OIDC issuer for k8s projected SA tokens — set automatically by `make install-terraform` via `generated-values-from-terraform/oidc.env`; override on the CLI if needed |
+| `OIDC_JWKS_URL` | `$(OIDC_ISSUER_URL)/jwks` | Public JWKS endpoint for the above issuer |
+
+When `JWT_AUTH_ENABLED=true`:
+- The **API** validates JWTs from two issuers: the GKE cluster (for sentinel/adapter SA tokens with audience `hyperfleet-api`) and Google accounts (for human callers).
+- **Sentinels** and **Adapters** mount a projected ServiceAccount token with audience `hyperfleet-api` and attach it as a bearer token on every API call.
+
+`OIDC_ISSUER_URL` is cluster-specific. For GCP environments it is populated automatically from `generated-values-from-terraform/oidc.env` after `make install-terraform` — no manual configuration needed. For e2e-gcp (no Terraform), pass it on the CLI:
+
+```bash
+HELMFILE_ENV=e2e-gcp NAMESPACE=<your-namespace> \
+  JWT_AUTH_ENABLED=true \
+  OIDC_ISSUER_URL=https://container.googleapis.com/v1/projects/hcm-hyperfleet/locations/europe-southwest1-a/clusters/hyperfleet-dev-<username>-eu1 \
+  make install-hyperfleet
+```
+
+For `HELMFILE_ENV=gcp` (after `make install-terraform`), `OIDC_ISSUER_URL` is set automatically:
+
+```bash
+JWT_AUTH_ENABLED=true make install-hyperfleet
+```
+
+To call the API as a human, use a GCP identity token via `kubectl port-forward` (traffic is tunnelled through the encrypted k8s API server connection — avoids sending the token over cleartext HTTP):
+
+```bash
+kubectl port-forward svc/hyperfleet-api 8000:8000 &
+TOKEN=$(gcloud auth print-identity-token)
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/hyperfleet/v1/clusters
+```
+
 ### E2E specific variables
 Variables only needed for e2e environments (HELMFILE_ENV=e2e-gcp/e2e-kind).
 
