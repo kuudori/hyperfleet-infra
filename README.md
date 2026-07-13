@@ -177,6 +177,37 @@ Configuration precedence (highest to lowest):
 | `CLEANER_AGE_MINUTES` | `180` | `180` | Minimum age (minutes) before a namespace is eligible for cleanup |
 | `CLEANER_MAESTRO_URL` | `http://maestro.$(MAESTRO_NAMESPACE).svc.cluster.local:8000` | `http://maestro.$(MAESTRO_NAMESPACE).svc.cluster.local:8000` | Maestro API URL used by the cleaner |
 
+### GCP JWT Authentication (optional)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `JWT_AUTH_ENABLED` | `false` | Set to `true` to enable JWT validation on the API and SA-token auth on sentinel/adapter |
+| `OIDC_ISSUER_URL` | `https://container.googleapis.com/v1/projects/<PROJECT_ID>/locations/europe-southwest1-a/clusters/hyperfleet-dev-amarin-eu1` | OIDC issuer for k8s projected SA tokens (cluster-specific) |
+| `OIDC_JWKS_URL` | `$(OIDC_ISSUER_URL)/jwks` | Public JWKS endpoint for the above issuer |
+
+When `JWT_AUTH_ENABLED=true`:
+- The **API** validates JWTs from two issuers: the GKE cluster (for sentinel/adapter SA tokens with audience `hyperfleet-api`) and Google accounts (for human callers).
+- **Sentinels** and **Adapters** mount a projected ServiceAccount token with audience `hyperfleet-api` and attach it as a bearer token on every API call.
+
+Example deployment with auth enabled (override image vars as needed):
+
+```bash
+HELMFILE_ENV=e2e-gcp NAMESPACE=amarin-eu1-ns1 \
+  JWT_AUTH_ENABLED=true \
+  OIDC_ISSUER_URL=https://container.googleapis.com/v1/projects/hcm-hyperfleet/locations/europe-southwest1-a/clusters/hyperfleet-dev-<username>-eu1 \
+  API_REPOSITORY=amarin/hyperfleet-api API_IMAGE_TAG=dev-1a6df40 \
+  SENTINEL_REPOSITORY=amarin/hyperfleet-sentinel SENTINEL_IMAGE_TAG=dev-a7c4cae \
+  ADAPTER_REPOSITORY=amarin/hyperfleet-adapter ADAPTER_IMAGE_TAG=dev-aa7a440 \
+  make install-hyperfleet
+```
+
+To call the API as a human, use a GCP identity token:
+
+```bash
+TOKEN=$(gcloud auth print-identity-token)
+curl -H "Authorization: Bearer $TOKEN" http://<API_EXTERNAL_IP>:8000/api/hyperfleet/v1/clusters
+```
+
 ### E2E specific variables
 Variables only needed for e2e environments (HELMFILE_ENV=e2e-gcp/e2e-kind).
 

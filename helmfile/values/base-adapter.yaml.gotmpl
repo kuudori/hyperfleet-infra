@@ -10,6 +10,12 @@ image:
 adapterConfig:
   log:
     level: debug
+  {{ if eq (env "JWT_AUTH_ENABLED" | default "false") "true" }}
+  hyperfleetApi:
+    auth:
+      enabled: true
+      audience: hyperfleet-api
+  {{ end }}
 
 broker:
   type: {{ .Values.brokerType }}
