@@ -29,11 +29,23 @@ config:
     jwt:
       enabled: true
       configs:
-        - issuer_url: {{ requiredEnv "OIDC_ISSUER_URL" }}
-          jwk_cert_url: {{ requiredEnv "OIDC_JWKS_URL" }}
+      {{/* GCP OIDC when OIDC_ISSUER_URL is explicitly provided; K8s in-cluster OIDC otherwise */}}
+      {{ if env "OIDC_ISSUER_URL" }}
+        - issuer_url: "{{ env "OIDC_ISSUER_URL" }}"
+          jwk_cert_url: "{{ env "OIDC_JWKS_URL" | default (printf "%s/jwks" (env "OIDC_ISSUER_URL")) }}"
           audience: hyperfleet-api
           identity_claim: sub
+          identity_claim_pattern: "^system:serviceaccount:{{ env "NAMESPACE" | default "hyperfleet" }}:.*$"
         - issuer_url: https://accounts.google.com
           jwk_cert_url: https://www.googleapis.com/oauth2/v3/certs
           identity_claim: email
+      {{ else }}
+        - issuer_url: "https://kubernetes.default.svc.cluster.local"
+          jwk_cert_url: "https://kubernetes.default.svc.cluster.local/openid/v1/jwks"
+          jwk_cert_ca_file: "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+          header: "Authorization"
+          audience: hyperfleet-api
+          identity_claim: sub
+          identity_claim_pattern: "^system:serviceaccount:{{ env "NAMESPACE" | default "hyperfleet-local" }}:.*$"
+      {{ end }}
   {{ end }}
