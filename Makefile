@@ -9,6 +9,7 @@ HELMFILE_ENV ?= gcp
 ifeq ($(findstring gcp,$(HELMFILE_ENV)),)
 	-include env.kind
 else
+	-include generated-values-from-terraform/oidc.env
 	-include env.gcp
 endif
 

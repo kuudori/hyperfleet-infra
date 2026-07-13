@@ -182,23 +182,26 @@ Configuration precedence (highest to lowest):
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `JWT_AUTH_ENABLED` | `false` | Set to `true` to enable JWT validation on the API and SA-token auth on sentinel/adapter |
-| `OIDC_ISSUER_URL` | `https://container.googleapis.com/v1/projects/<PROJECT_ID>/locations/europe-southwest1-a/clusters/hyperfleet-dev-amarin-eu1` | OIDC issuer for k8s projected SA tokens (cluster-specific) |
+| `OIDC_ISSUER_URL` | *(from Terraform output)* | OIDC issuer for k8s projected SA tokens — set automatically by `make install-terraform` via `generated-values-from-terraform/oidc.env`; override on the CLI if needed |
 | `OIDC_JWKS_URL` | `$(OIDC_ISSUER_URL)/jwks` | Public JWKS endpoint for the above issuer |
 
 When `JWT_AUTH_ENABLED=true`:
 - The **API** validates JWTs from two issuers: the GKE cluster (for sentinel/adapter SA tokens with audience `hyperfleet-api`) and Google accounts (for human callers).
 - **Sentinels** and **Adapters** mount a projected ServiceAccount token with audience `hyperfleet-api` and attach it as a bearer token on every API call.
 
-Example deployment with auth enabled (override image vars as needed):
+`OIDC_ISSUER_URL` is cluster-specific. For GCP environments it is populated automatically from `generated-values-from-terraform/oidc.env` after `make install-terraform` — no manual configuration needed. For e2e-gcp (no Terraform), pass it on the CLI:
 
 ```bash
-HELMFILE_ENV=e2e-gcp NAMESPACE=amarin-eu1-ns1 \
+HELMFILE_ENV=e2e-gcp NAMESPACE=<your-namespace> \
   JWT_AUTH_ENABLED=true \
   OIDC_ISSUER_URL=https://container.googleapis.com/v1/projects/hcm-hyperfleet/locations/europe-southwest1-a/clusters/hyperfleet-dev-<username>-eu1 \
-  API_REPOSITORY=amarin/hyperfleet-api API_IMAGE_TAG=dev-1a6df40 \
-  SENTINEL_REPOSITORY=amarin/hyperfleet-sentinel SENTINEL_IMAGE_TAG=dev-a7c4cae \
-  ADAPTER_REPOSITORY=amarin/hyperfleet-adapter ADAPTER_IMAGE_TAG=dev-aa7a440 \
   make install-hyperfleet
+```
+
+For `HELMFILE_ENV=gcp` (after `make install-terraform`), `OIDC_ISSUER_URL` is set automatically:
+
+```bash
+JWT_AUTH_ENABLED=true make install-hyperfleet
 ```
 
 To call the API as a human, use a GCP identity token:
