@@ -204,11 +204,12 @@ For `HELMFILE_ENV=gcp` (after `make install-terraform`), `OIDC_ISSUER_URL` is se
 JWT_AUTH_ENABLED=true make install-hyperfleet
 ```
 
-To call the API as a human, use a GCP identity token:
+To call the API as a human, use a GCP identity token via `kubectl port-forward` (traffic is tunnelled through the encrypted k8s API server connection — avoids sending the token over cleartext HTTP):
 
 ```bash
+kubectl port-forward svc/hyperfleet-api 8000:8000 &
 TOKEN=$(gcloud auth print-identity-token)
-curl -H "Authorization: Bearer $TOKEN" http://<API_EXTERNAL_IP>:8000/api/hyperfleet/v1/clusters
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/hyperfleet/v1/clusters
 ```
 
 ### E2E specific variables
