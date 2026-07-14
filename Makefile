@@ -357,18 +357,17 @@ define check-namespace
 endef
 
 .PHONY: check-jwt-config
-check-jwt-config: ## Validate OIDC variables when JWT_AUTH_ENABLED=true; no-op otherwise
-	@if [ "$(JWT_AUTH_ENABLED)" = "true" ]; then \
-		if [ -z "$(OIDC_ISSUER_URL)" ]; then \
-			echo "ERROR: JWT_AUTH_ENABLED=true but OIDC_ISSUER_URL is not set."; \
-			echo "       Run 'make install-terraform' to populate it automatically, or pass it on the CLI."; \
-			exit 1; \
-		fi; \
-		echo "$(OIDC_ISSUER_URL)" | grep -q "^https://" \
-			|| { echo "ERROR: OIDC_ISSUER_URL must start with https:// (got: $(OIDC_ISSUER_URL))"; exit 1; }; \
-		echo "$(OIDC_JWKS_URL)" | grep -q "^https://" \
-			|| { echo "ERROR: OIDC_JWKS_URL must start with https:// (got: $(OIDC_JWKS_URL))"; exit 1; }; \
+check-jwt-config: ## Validate OIDC variables when JWT_AUTH_ENABLED=true with GCP OIDC; no-op otherwise
+	@if [ "$(JWT_AUTH_ENABLED)" = "true" ] && [ -n "$(OIDC_ISSUER_URL)" ]; then \
+		echo "$(OIDC_ISSUER_URL)" | grep -qE "^https://[a-zA-Z0-9]" \
+			|| { echo "ERROR: OIDC_ISSUER_URL must be a valid https:// URL (got: $(OIDC_ISSUER_URL))"; exit 1; }; \
+		echo "$(OIDC_JWKS_URL)" | grep -qE "^https://[a-zA-Z0-9]" \
+			|| { echo "ERROR: OIDC_JWKS_URL must be a valid https:// URL (got: $(OIDC_JWKS_URL))"; exit 1; }; \
 		echo "OK: JWT auth config validated (OIDC_ISSUER_URL=$(OIDC_ISSUER_URL))"; \
+	elif [ "$(JWT_AUTH_ENABLED)" = "true" ] && [ -n "$(OIDC_JWKS_URL)" ]; then \
+		echo "ERROR: OIDC_JWKS_URL is set without OIDC_ISSUER_URL. Set both or neither."; exit 1; \
+	elif [ "$(JWT_AUTH_ENABLED)" = "true" ]; then \
+		echo "OK: JWT auth enabled with K8s in-cluster OIDC (no OIDC_ISSUER_URL needed)"; \
 	fi
 
 .PHONY: check-hyperfleet-namespace
