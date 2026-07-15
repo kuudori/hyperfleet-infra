@@ -183,7 +183,7 @@ Configuration precedence (highest to lowest):
 |----------|---------|-------------|
 | `JWT_AUTH_ENABLED` | `false` | Set to `true` to enable JWT validation on the API and SA-token auth on sentinel/adapter |
 | `OIDC_ISSUER_URL` | *(unset; from Terraform for GCP)* | GCP OIDC issuer. When set, uses GCP OIDC. When absent, uses K8s in-cluster OIDC. |
-| `OIDC_JWKS_URL` | `$(OIDC_ISSUER_URL)/jwks` | Public JWKS endpoint for the above issuer |
+| `OIDC_JWKS_URL` | *(empty: Helm chart derives `OIDC_ISSUER_URL/jwks` itself if not set)* | Public JWKS endpoint for the above issuer (ignored when using in-cluster OIDC) |
 
 When `JWT_AUTH_ENABLED=true`, the template auto-detects the backend based on `OIDC_ISSUER_URL`:
 
