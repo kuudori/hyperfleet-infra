@@ -1,0 +1,38 @@
+# Observability stack configuration
+# Components: kube-prometheus-stack
+
+helmDefaults:
+  createNamespace: true
+  wait: true
+  timeout: 600
+  cleanupOnFail: true
+
+values:
+  - monitoringNamespace: {{ env "MONITORING_NAMESPACE" | default "monitoring" }}
+
+environments:
+  e2e-gcp:
+    values: []
+  e2e-kind:
+    values: []
+  kind:
+    values: []
+  gcp:
+    values: []
+
+commonLabels:
+  group: observability
+
+---
+
+# validation is disabled on install because of helm diff trying to fetch CRDs which do not exist at the time
+releases:
+  - name: kube-prometheus-stack
+    namespace: {{ .Values.monitoringNamespace }}
+    chart: oci://ghcr.io/prometheus-community/charts/kube-prometheus-stack
+    version: 87.18.0
+    disableValidationOnInstall: true
+    labels:
+      component: kube-prometheus-stack
+    values:
+      - values/base-kube-prometheus-stack.yaml.gotmpl
