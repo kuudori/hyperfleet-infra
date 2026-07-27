@@ -1,5 +1,13 @@
 # Base values for HyperFleet API
 
+{{ if eq (env "OBSERVABILITY_ENABLED" | default "false") "true" }}
+serviceMonitor:
+  enabled: true
+monitoring:
+  prometheusRule:
+    enabled: true
+{{ end }}
+
 image:
   registry: {{ env "REGISTRY" | default "quay.io" }}
   repository: {{ env "API_REPOSITORY" | default "redhat-services-prod/hyperfleet-tenant/hyperfleet/hyperfleet-api" }}

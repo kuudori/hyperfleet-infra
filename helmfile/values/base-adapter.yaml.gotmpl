@@ -1,5 +1,10 @@
 # Values that get applied to all adapter charts
 
+{{ if eq (env "OBSERVABILITY_ENABLED" | default "false") "true" }}
+serviceMonitor:
+  enabled: true
+{{ end }}
+
 image:
   registry: {{ env "REGISTRY" | default "quay.io" }}
   repository: {{ env "ADAPTER_REPOSITORY" | default "redhat-services-prod/hyperfleet-tenant/hyperfleet/hyperfleet-adapter" }}

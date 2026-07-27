@@ -284,6 +284,40 @@ uninstall-cleaner: check-helm check-kubectl ## Uninstall namespace cleaner CronJ
 	helm uninstall namespace-cleaner --namespace $(CLEANER_NAMESPACE) || true
 	@echo "OK: namespace cleaner uninstalled"
 
+# ==== Observability Targets ====
+OBSERVABILITY_HELMFILE := helmfile/observability.yaml.gotmpl
+GRAFANA_ADMIN_USER     ?= admin
+GRAFANA_ADMIN_PASSWORD ?=
+
+.PHONY: maybe-install-grafana
+maybe-install-grafana:
+ifneq ($(strip $(OBSERVABILITY_ENABLED)),true)
+	@echo "[NOTE: Skipping observability stack]"
+	@echo "To enable set OBSERVABILITY_ENABLED=true in env.kind or env.gcp"
+else
+	$(MAKE) install-grafana
+endif
+
+.PHONY: install-grafana
+install-grafana: check-helmfile check-kubectl-context ## Install kube-prometheus-stack (Prometheus + Grafana + Operator + CRDs)
+	@test -n "$(GRAFANA_ADMIN_PASSWORD)" || { echo "ERROR: GRAFANA_ADMIN_PASSWORD is required"; exit 1; }
+	$(call check-namespace,$(MONITORING_NAMESPACE))
+	@kubectl create secret generic grafana-admin-credentials \
+		--namespace $(MONITORING_NAMESPACE) \
+		--from-literal=admin-user=$(GRAFANA_ADMIN_USER) \
+		--from-literal=admin-password=$(GRAFANA_ADMIN_PASSWORD) \
+		--dry-run=client -o yaml | kubectl apply -f -
+	helmfile -f $(OBSERVABILITY_HELMFILE) -e $(HELMFILE_ENV) -l component=kube-prometheus-stack apply
+
+.PHONY: uninstall-grafana
+uninstall-grafana: check-kubectl-context ## Uninstall kube-prometheus-stack
+	@if helm list --namespace $(MONITORING_NAMESPACE) --short | grep -q '^kube-prometheus-stack$$'; then \
+		helmfile -f $(OBSERVABILITY_HELMFILE) -e $(HELMFILE_ENV) -l component=kube-prometheus-stack destroy; \
+		kubectl delete secret grafana-admin-credentials --namespace $(MONITORING_NAMESPACE) --ignore-not-found; \
+	else \
+		echo "[NOTE: kube-prometheus-stack not installed, skipping uninstall]"; \
+	fi
+
 # ==== Prerequisite/Utility Targets ====
 .PHONY: check-helm
 check-helm: ## Verify helm and helm-git plugin are installed
@@ -411,10 +445,12 @@ status: check-kubectl check-helmfile-env ## Show helm releases and pod status
 	@echo "=== Helm Releases ==="
 	@helm list --namespace $(NAMESPACE) 2>/dev/null || true
 	@helm list --namespace $(MAESTRO_NAMESPACE) 2>/dev/null || true
+	@helm list --namespace $(MONITORING_NAMESPACE) 2>/dev/null || true
 	@echo ""
 	@echo "=== Pods ==="
 	@kubectl get pods --namespace $(NAMESPACE) 2>/dev/null || true
 	@kubectl get pods --namespace $(MAESTRO_NAMESPACE) 2>/dev/null || true
+	@kubectl get pods --namespace $(MONITORING_NAMESPACE) 2>/dev/null || true
 
 .PHONY: help
 help: ## Show this help message
@@ -517,14 +553,14 @@ ci-cleanup: uninstall-maestro destroy-terraform ## Ci cleanup: uninstall maestro
 # Kind targets
 
 .PHONY: local-up-kind
-local-up-kind: create-kind-cluster kind-build-images install-priority-classes install-maestro-all generate-rabbitmq-values install-hyperfleet ## Full local kind setup (cluster + images + maestro + hyperfleet)
+local-up-kind: create-kind-cluster kind-build-images install-priority-classes install-maestro-all generate-rabbitmq-values maybe-install-grafana install-hyperfleet ## Full local kind setup (cluster + images + maestro + hyperfleet)
 
 .PHONY: local-down-kind
-local-down-kind: uninstall-hyperfleet uninstall-maestro delete-kind-cluster ## Tear down kind: uninstall all + delete cluster
+local-down-kind: uninstall-hyperfleet uninstall-grafana uninstall-maestro delete-kind-cluster ## Tear down kind: uninstall all + delete cluster
 
 # GKE targets
 .PHONY: local-up-gcp
-local-up-gcp: install-terraform get-credentials install-priority-classes install-maestro-all install-hyperfleet ## Full gke setup (cluster + maestro + hyperfleet)
+local-up-gcp: install-terraform get-credentials install-priority-classes install-maestro-all maybe-install-grafana install-hyperfleet ## Full gke setup (cluster + maestro + hyperfleet)
 
 .PHONY: local-down-gcp
-local-down-gcp: get-credentials uninstall-maestro uninstall-hyperfleet destroy-terraform ## Tear down gke (cluster + maestro + hyperfleet)
+local-down-gcp: get-credentials uninstall-grafana uninstall-maestro uninstall-hyperfleet destroy-terraform ## Tear down gke (cluster + maestro + hyperfleet)

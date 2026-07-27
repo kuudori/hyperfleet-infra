@@ -1,5 +1,13 @@
 # Base values for HyperFleet Sentinel
 
+{{ if eq (env "OBSERVABILITY_ENABLED" | default "false") "true" }}
+monitoring:
+  serviceMonitor:
+    enabled: true
+  prometheusRule:
+    enabled: true
+{{ end }}
+
 image:
   registry: {{ env "REGISTRY" | default "quay.io" }}
   repository: {{ env "SENTINEL_REPOSITORY" | default "redhat-services-prod/hyperfleet-tenant/hyperfleet/hyperfleet-sentinel" }}
