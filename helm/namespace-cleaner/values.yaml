@@ -8,12 +8,21 @@ image:
 # Cron schedule for the cleaner job (default: every hour)
 schedule: "0 * * * *"
 
+# Replace a previous run so a stale Job cannot block later schedules.
+concurrencyPolicy: Replace
+
+# Do not start a missed schedule after this delay.
+startingDeadlineSeconds: 300
+
+# Run the cleaner ahead of default-priority workloads when nodes are full.
+priorityClassName: hyperfleet-critical
+
 # Space-separated label selectors used to identify namespaces eligible for deletion.
 # Each selector is matched independently (OR semantics).
 labelSelector: "hyperfleet.io/cluster-id hyperfleet.io/test-run e2e.hyperfleet.io/run-id"
 
 # Delete namespaces older than this many minutes
-ageMinutes: 180
+ageMinutes: 120
 
 # Maestro API base URL — used to delete resource bundles before removing namespaces
 maestroURL: "http://maestro.maestro.svc.cluster.local:8000"

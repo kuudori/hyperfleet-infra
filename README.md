@@ -153,6 +153,12 @@ Set `TRACING_ENABLED=true` and `OBSERVABILITY_ENABLED=true`.
 
 ### Namespace Cleaner
 
+`make install-cleaner` first provisions the shared `hyperfleet-critical`
+PriorityClass, then installs the hourly namespace-cleaner CronJob. The cleaner
+uses `Replace` concurrency so stale active Jobs do not block later schedules;
+missed schedules are limited to 300 seconds. These scheduling bounds are
+configurable in the chart values.
+
 | Target | Description |
 |--------|-------------|
 | `make install-cleaner` | Install namespace cleaner CronJob (configurable via `CLEANER_*` variables) |
@@ -171,7 +177,7 @@ Set `TRACING_ENABLED=true` and `OBSERVABILITY_ENABLED=true`.
 
 | Target | Description |
 | -------- | ------------- |
-| `make ci-dry-run` | `ci-validate` + `validate maestro` |
+| `make ci-dry-run` | `ci-validate` + `validate maestro` + `validate namespace cleaner` + other chart/config checks |
 | `make ci-test` | `install terraform` + `get-credentials` + `install-maestro` + `create-maestro-consumer` + `health-check-maestro` |
 | `make ci-cleanup` | `uninstall-maestro` + `destroy-terraform` |
 
@@ -200,7 +206,7 @@ Set `TRACING_ENABLED=true` and `OBSERVABILITY_ENABLED=true`.
 | `CLEANER_NAMESPACE` | `$(NAMESPACE)` | `$(NAMESPACE)` | Namespace to install the cleaner into |
 | `CLEANER_SCHEDULE` | `0 * * * *` | `0 * * * *` | Cron schedule for the cleaner job |
 | `CLEANER_LABEL_SELECTOR` | `hyperfleet.io/cluster-id` | `hyperfleet.io/cluster-id` | Label selector to identify orphan namespaces |
-| `CLEANER_AGE_MINUTES` | `180` | `180` | Minimum age (minutes) before a namespace is eligible for cleanup |
+| `CLEANER_AGE_MINUTES` | `120` | `120` | Minimum age (minutes) before a namespace is eligible for cleanup |
 | `CLEANER_MAESTRO_URL` | `http://maestro.$(MAESTRO_NAMESPACE).svc.cluster.local:8000` | `http://maestro.$(MAESTRO_NAMESPACE).svc.cluster.local:8000` | Maestro API URL used by the cleaner |
 | `OBSERVABILITY_ENABLED` | `false` | `false` | Set to `true` to deploy kube-prometheus-stack (Prometheus + Grafana) and enable ServiceMonitors |
 | `TRACING_ENABLED` | `false` | `false` | Set to `true` to deploy Tempo + OpenTelemetry Collector and enable OTLP tracing (requires `OBSERVABILITY_ENABLED=true`) |
