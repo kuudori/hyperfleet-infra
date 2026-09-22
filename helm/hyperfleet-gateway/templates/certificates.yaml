@@ -51,6 +51,7 @@ metadata:
 spec:
   ca:
     secretName: {{ $rootCASecretName }}
+{{- if .Values.auth.extAuthz.enabled }}
 ---
 apiVersion: cert-manager.io/v1
 kind: Certificate
@@ -89,6 +90,7 @@ spec:
     - {{ $authorinoOIDCServiceName }}
     - {{ printf "%s.%s.svc" $authorinoOIDCServiceName .Release.Namespace }}
     - {{ printf "%s.%s.svc.cluster.local" $authorinoOIDCServiceName .Release.Namespace }}
+{{- end }}
 ---
 apiVersion: cert-manager.io/v1
 kind: Certificate
