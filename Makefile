@@ -79,7 +79,7 @@ OCI_SWEEP_DIR        ?= functions/oci-ci-sweep
 CLEANER_NAMESPACE    ?= $(NAMESPACE)
 CLEANER_SCHEDULE     ?= 0 * * * *
 CLEANER_LABEL_SELECTOR ?= hyperfleet.io/cluster-id hyperfleet.io/test-run e2e/hyperfleet.io/run-id
-CLEANER_AGE_MINUTES  ?= 180
+CLEANER_AGE_MINUTES  ?= 120
 CLEANER_MAESTRO_URL  ?= http://maestro.$(MAESTRO_NAMESPACE).svc.cluster.local:8000
 
 # ==== Terraform Targets ====
@@ -427,7 +427,7 @@ add-ttl-labels: ## Add TTL labels to existing GKE clusters (DRY_RUN=true by defa
 
 # ==== Namespace Cleaner Targets ====
 .PHONY: install-cleaner
-install-cleaner: check-helm check-kubectl ## Install namespace cleaner CronJob (CLEANER_SCHEDULE, CLEANER_LABEL_SELECTOR, CLEANER_AGE_MINUTES)
+install-cleaner: check-helm check-kubectl install-priority-classes ## Install namespace cleaner CronJob (CLEANER_SCHEDULE, CLEANER_LABEL_SELECTOR, CLEANER_AGE_MINUTES)
 	$(call check-namespace,CLEANER_NAMESPACE)
 	helm upgrade --install namespace-cleaner $(HELM_DIR)/namespace-cleaner \
 		--namespace $(CLEANER_NAMESPACE) \
@@ -913,15 +913,31 @@ validate-network-policies: check-helm ## Validate network-policies Helm chart re
 		|| { echo "ERROR: hyperfleet-api-postgres-ingress NetworkPolicy not rendered"; exit 1; }
 	@echo "OK: network-policies chart rendered successfully"
 
+.PHONY: validate-namespace-cleaner
+validate-namespace-cleaner: check-helm ## Validate namespace-cleaner Helm chart rendering
+	@echo "Validating namespace-cleaner chart..."
+	@out=$$(helm template namespace-cleaner $(HELM_DIR)/namespace-cleaner --namespace hyperfleet --show-only templates/cronjob.yaml) \
+		|| { echo "ERROR: namespace-cleaner chart failed to render"; exit 1; }; \
+	echo "$$out" | grep -q '^  concurrencyPolicy: Replace$$' \
+		|| { echo "ERROR: namespace-cleaner concurrency policy is not Replace"; exit 1; }; \
+	echo "$$out" | grep -q '^  startingDeadlineSeconds: 300$$' \
+		|| { echo "ERROR: namespace-cleaner starting deadline is not 300 seconds"; exit 1; }; \
+	echo "$$out" | grep -q '^          priorityClassName: hyperfleet-critical$$' \
+		|| { echo "ERROR: namespace-cleaner priority class is not hyperfleet-critical at Pod level"; exit 1; }; \
+	echo "$$out" | awk '/- name: AGE_MINUTES/{getline; if ($$0 ~ /value: "120"/) found=1} END{exit !found}' \
+		|| { echo "ERROR: namespace-cleaner AGE_MINUTES is not 120"; exit 1; }
+	@echo "OK: namespace-cleaner chart rendered with scheduled-run replacement and critical priority"
+
 .PHONY: ci-validate
 ci-validate: validate-terraform lint-helm lint-shellcheck ## Ci validate: validate terraform (all stacks) + lint helm + lint shellcheck
 
 .PHONY: ci-dry-run
-ci-dry-run: ci-validate ## Ci dry-run: ci-validate + validate maestro + validate authorino + validate network policies + validate mock OIDC
+ci-dry-run: ci-validate ## Ci dry-run: ci-validate + validate maestro + validate authorino + validate network policies + validate namespace cleaner + validate mock OIDC
 	$(MAKE) validate-maestro
 	$(MAKE) validate-mock-oidc
 	$(MAKE) validate-authorino
 	$(MAKE) validate-network-policies
+	$(MAKE) validate-namespace-cleaner
 
 .PHONY: health-check-maestro
 health-check-maestro: check-kubectl ## Verify Maestro Components

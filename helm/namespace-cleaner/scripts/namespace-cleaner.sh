@@ -2,7 +2,7 @@
 set -eo pipefail
 
 LABEL_SELECTOR="${LABEL_SELECTOR:-hyperfleet.io/cluster-id hyperfleet.io/test-run}"
-AGE_MINUTES="${AGE_MINUTES:-180}"
+AGE_MINUTES="${AGE_MINUTES:-120}"
 MAESTRO_URL="${MAESTRO_URL:-http://maestro.maestro.svc.cluster.local:8000}"
 DRY_RUN="${DRY_RUN:-false}"
 

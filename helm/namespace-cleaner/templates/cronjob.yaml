@@ -7,7 +7,8 @@ metadata:
     {{- include "namespace-cleaner.labels" . | nindent 4 }}
 spec:
   schedule: {{ .Values.schedule | quote }}
-  concurrencyPolicy: Forbid
+  concurrencyPolicy: {{ .Values.concurrencyPolicy }}
+  startingDeadlineSeconds: {{ .Values.startingDeadlineSeconds }}
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
   jobTemplate:
@@ -17,6 +18,7 @@ spec:
           labels:
             {{- include "namespace-cleaner.selectorLabels" . | nindent 12 }}
         spec:
+          priorityClassName: {{ .Values.priorityClassName }}
           serviceAccountName: {{ include "namespace-cleaner.fullname" . }}
           restartPolicy: OnFailure
           volumes:
