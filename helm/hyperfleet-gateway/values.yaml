@@ -80,6 +80,11 @@ service:
   port: 8000
   adminPort: 9901
 
+tls:
+  hyperfleetApiTLSSecretName: hyperfleet-api-server-cert
+  authorinoAuthorizationTLSSecretName: authorino-server-cert
+  authorinoOIDCTLSSecretName: authorino-oidc-server-cert
+
 # -----------------------------------------------------------------------------
 # Envoy — gateway/proxy behavior knobs that are customized
 # per deployment/environment. The rest of the Envoy configuration lives
@@ -124,9 +129,6 @@ auth:
   authorino:
     # Pin published image; align with AUTHORINO_OPERATOR_VERSION in Makefile.
     image: quay.io/kuadrant/authorino:v0.26.2
-    # TODO(HYPERFLEET-1483): listener/oidcServer TLS and gateway->API NetworkPolicy.
-    tls:
-      enabled: false
     # Empty: gateway Service DNS + localhost (see authconfig.yaml).
     hosts: []
     logging:

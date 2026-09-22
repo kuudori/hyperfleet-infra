@@ -11,12 +11,15 @@ spec:
   # Pin image; operator default may be unpublished on quay.
   image: {{ .Values.auth.authorino.image | quote }}
   {{- end }}
-  # TODO(HYPERFLEET-1483): listener/oidcServer TLS and gateway->API NetworkPolicy.
   listener:
     tls:
-      enabled: {{ .Values.auth.authorino.tls.enabled }}
+      enabled: true
+      certSecretRef:
+        name: {{ .Values.tls.authorinoAuthorizationTLSSecretName }}
   oidcServer:
     tls:
-      enabled: {{ .Values.auth.authorino.tls.enabled }}
+      enabled: true
+      certSecretRef:
+        name: {{ .Values.tls.authorinoOIDCTLSSecretName }}
   logLevel: {{ .Values.auth.authorino.logging.level }}
 {{- end }}

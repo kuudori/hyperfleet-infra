@@ -58,6 +58,10 @@ via the operator's naming convention ("<name>-authorino" ServiceAccount,
 authorino
 {{- end }}
 
+{{- define "hyperfleet-gateway.rootCASecretName" -}}
+hyperfleet-gateway-ca-cert
+{{- end }}
+
 {{/*
 Create the name of the ServiceAccount to use.
 */}}

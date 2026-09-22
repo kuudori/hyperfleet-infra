@@ -62,6 +62,9 @@ spec:
             - name: config
               mountPath: /etc/envoy
               readOnly: true
+            - name: gateway-ca
+              mountPath: /etc/envoy/tls
+              readOnly: true
           resources:
             {{- toYaml .Values.deployment.resources | nindent 12 }}
           readinessProbe:
@@ -81,6 +84,12 @@ spec:
         - name: config
           configMap:
             name: {{ include "hyperfleet-gateway.fullname" . }}
+        - name: gateway-ca
+          secret:
+            secretName: {{ include "hyperfleet-gateway.rootCASecretName" . }}
+            items:
+              - key: ca.crt
+                path: ca.crt
       {{- with .Values.deployment.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

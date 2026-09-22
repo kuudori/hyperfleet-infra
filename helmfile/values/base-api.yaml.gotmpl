@@ -36,6 +36,20 @@ service:
   # stays ClusterIP so it can't be reached directly, bypassing gateway header stripping.
   type: ClusterIP
 
+extraVolumes:
+  - name: api-tls
+    secret:
+      secretName: hyperfleet-api-server-cert
+      items:
+        - key: tls.crt
+          path: tls.crt
+        - key: tls.key
+          path: tls.key
+extraVolumeMounts:
+  - name: api-tls
+    mountPath: /etc/hyperfleet/tls
+    readOnly: true
+
 config:
   entities:
     - kind: Cluster
@@ -92,8 +106,11 @@ config:
     mirror the active TENANT_MODEL headers in the gateway chart, so a model
     swap moves both sides in lockstep.
   */}}
-  {{ if or $tenantIsolationEnabled $jwtEnabled }}
   server:
+    tls:
+      enabled: true
+      cert_file: /etc/hyperfleet/tls/tls.crt
+      key_file: /etc/hyperfleet/tls/tls.key
     {{ if $tenantIsolationEnabled }}
     tenant:
       enabled: true
@@ -141,4 +158,3 @@ config:
           identity_claim_pattern: "^system:serviceaccount:{{ env "NAMESPACE" | default "hyperfleet-local" }}:.*$"
       {{ end }}
     {{ end }}
-  {{ end }}
