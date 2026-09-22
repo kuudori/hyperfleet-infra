@@ -9,6 +9,11 @@ monitoring:
 service:
   type: {{ .Values.gatewayServiceType }}
 
+tls:
+  hyperfleetApiTLSSecretName: hyperfleet-api-server-cert
+  authorinoAuthorizationTLSSecretName: authorino-server-cert
+  authorinoOIDCTLSSecretName: authorino-oidc-server-cert
+
 envoy:
   logging:
     level: {{ env "ENVOY_LOG_LEVEL" | default "info" }}

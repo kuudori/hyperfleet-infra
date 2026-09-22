@@ -115,6 +115,8 @@ releases:
   - name: hyperfleet-api
     namespace: {{ .Values.namespace }}
     chart: hyperfleet-api/hyperfleet-api
+    needs:
+      - hyperfleet-gateway
     labels:
       component: api
     values:
@@ -123,8 +125,6 @@ releases:
   - name: hyperfleet-gateway
     namespace: {{ .Values.namespace }}
     chart: ../helm/hyperfleet-gateway
-    needs:
-      - hyperfleet-api
 {{ if and (eq (env "EXT_AUTHZ_ENABLED" | default "false") "true") (eq .Values.oidcIssuerMode "mock") }}
       - hyperfleet-mock-oidc
 {{ end }}

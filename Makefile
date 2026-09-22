@@ -73,6 +73,11 @@ AUTHORINO_OPERATOR_NAMESPACE      ?= authorino-operator
 AUTHORINO_OPERATOR_MANIFEST       ?= https://raw.githubusercontent.com/Kuadrant/authorino-operator/$(AUTHORINO_OPERATOR_COMMIT)/config/deploy/manifests.yaml
 AUTHORINO_OPERATOR_MANIFEST_SHA256 ?= ce2bef459d1456cbe462754cad571f87150fc1ad8bee4f1d010eb0db5b0aabdd
 
+CERT_MANAGER_VERSION         ?= v1.21.2
+CERT_MANAGER_NAMESPACE       ?= cert-manager
+CERT_MANAGER_MANIFEST        ?= https://github.com/cert-manager/cert-manager/releases/download/$(CERT_MANAGER_VERSION)/cert-manager.yaml
+CERT_MANAGER_MANIFEST_SHA256 ?= e03b668ec8675214af6b0a671699d088f2601fa3878e0dbe1b41d3feafd1879f
+
 LIFECYCLE_DIR        ?= functions/lifecycle-enforcer
 OCI_SWEEP_DIR        ?= functions/oci-ci-sweep
 
@@ -265,7 +270,38 @@ uninstall-maestro: check-helm uninstall-applied-manifest-crd ## Uninstall Maestr
 	helm uninstall $(MAESTRO_NAMESPACE)-maestro --namespace $(MAESTRO_NAMESPACE) || true
 
 
-# ==== Authorino Targets ====
+# ==== Gateway Security Targets ====
+.PHONY: install-cert-manager
+install-cert-manager: check-kubectl ## Install cert-manager (pinned, cluster-wide) for gateway internal TLS
+	@echo "Installing cert-manager $(CERT_MANAGER_VERSION)..."
+	@tmp=$$(mktemp) && \
+	if ! curl -fsSL -o "$$tmp" "$(CERT_MANAGER_MANIFEST)"; then \
+		echo "ERROR: failed to download cert-manager manifest"; rm -f "$$tmp"; exit 1; \
+	fi; \
+	actual=$$( (command -v sha256sum >/dev/null 2>&1 && sha256sum "$$tmp" || shasum -a 256 "$$tmp") | cut -d' ' -f1 ); \
+	if [ "$$actual" != "$(CERT_MANAGER_MANIFEST_SHA256)" ]; then \
+		echo "ERROR: cert-manager manifest checksum mismatch (expected $(CERT_MANAGER_MANIFEST_SHA256), got $$actual)"; rm -f "$$tmp"; exit 1; \
+	fi; \
+	kubectl apply -f "$$tmp"; \
+	rc=$$?; rm -f "$$tmp"; exit $$rc
+	@kubectl wait --for=condition=Available deployment/cert-manager deployment/cert-manager-cainjector deployment/cert-manager-webhook --namespace $(CERT_MANAGER_NAMESPACE) --timeout=180s
+	@echo "OK: cert-manager installed"
+
+.PHONY: uninstall-cert-manager
+uninstall-cert-manager: check-kubectl ## Uninstall cert-manager explicitly (cluster-wide)
+	@echo "Uninstalling cert-manager $(CERT_MANAGER_VERSION)..."
+	@tmp=$$(mktemp) && \
+	if ! curl -fsSL -o "$$tmp" "$(CERT_MANAGER_MANIFEST)"; then \
+		echo "ERROR: failed to download cert-manager manifest"; rm -f "$$tmp"; exit 1; \
+	fi; \
+	actual=$$( (command -v sha256sum >/dev/null 2>&1 && sha256sum "$$tmp" || shasum -a 256 "$$tmp") | cut -d' ' -f1 ); \
+	if [ "$$actual" != "$(CERT_MANAGER_MANIFEST_SHA256)" ]; then \
+		echo "ERROR: cert-manager manifest checksum mismatch (expected $(CERT_MANAGER_MANIFEST_SHA256), got $$actual)"; rm -f "$$tmp"; exit 1; \
+	fi; \
+	kubectl delete -f "$$tmp" --ignore-not-found; \
+	rc=$$?; rm -f "$$tmp"; exit $$rc
+	@echo "OK: cert-manager uninstalled"
+
 .PHONY: install-authorino-operator
 install-authorino-operator: check-kubectl ## Install the Authorino operator (pinned, cluster-wide) - prerequisite for gateway ext_authz
 	@echo "Installing Authorino operator $(AUTHORINO_OPERATOR_VERSION)..."
@@ -343,7 +379,7 @@ install-repos: check-helmfile-env ## Add all hyperfleet helm repos
 	$(call add-helm-repo,adapter,$(ADAPTER_CHART_REF))
 
 .PHONY: install-hyperfleet
-install-hyperfleet: check-helmfile-env check-hyperfleet-namespace check-jwt-config check-ext-authz-config check-tenant-isolation-config maybe-install-authorino-operator ## Install all HyperFleet components
+install-hyperfleet: check-helmfile-env check-hyperfleet-namespace check-jwt-config check-ext-authz-config check-tenant-isolation-config install-cert-manager maybe-install-authorino-operator ## Install all HyperFleet components with internal TLS
 	helmfile -f helmfile/helmfile.yaml.gotmpl -e $(HELMFILE_ENV) apply
 
 .PHONY: switch-tenant-model
@@ -361,7 +397,8 @@ switch-tenant-model: check-helmfile-env check-ext-authz-config check-tenant-isol
 	@echo "OK: tenant model switched to '$(TENANT_MODEL)' (same AuthConfig name replaces the policy; old-model tokens are rejected at the gateway)"
 
 .PHONY: install-api
-install-api: check-helmfile-env check-jwt-config check-tenant-isolation-config ## Install HyperFleet API
+install-api: check-helmfile-env check-hyperfleet-namespace check-jwt-config check-tenant-isolation-config install-cert-manager maybe-install-authorino-operator ## Install gateway TLS prerequisite and HyperFleet API
+	helmfile apply -f helmfile/helmfile.yaml.gotmpl -e $(HELMFILE_ENV) -l component=gateway
 	helmfile apply -f helmfile/helmfile.yaml.gotmpl -e $(HELMFILE_ENV) -l component=api
 
 .PHONY: install-sentinels

@@ -1,0 +1,110 @@
+{{- $authorinoAuthorizationServiceName := printf "%s-authorino-authorization" (include "hyperfleet-gateway.authorinoName" .) -}}
+{{- $authorinoOIDCServiceName := printf "%s-authorino-oidc" (include "hyperfleet-gateway.authorinoName" .) -}}
+{{- $rootSelfSignedIssuerName := printf "%s-selfsigned" (include "hyperfleet-gateway.fullname" .) -}}
+{{- $rootCAIssuerName := printf "%s-ca" (include "hyperfleet-gateway.fullname" .) -}}
+{{- $rootCACertificateName := $rootCAIssuerName -}}
+{{- $rootCASecretName := include "hyperfleet-gateway.rootCASecretName" . -}}
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ $rootSelfSignedIssuerName }}
+  labels:
+    {{- include "hyperfleet-gateway.labels" . | nindent 4 }}
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $rootCACertificateName }}
+  labels:
+    {{- include "hyperfleet-gateway.labels" . | nindent 4 }}
+spec:
+  commonName: HyperFleet Gateway Root CA
+  subject:
+    organizations:
+      - HyperFleet
+  isCA: true
+  duration: 87600h
+  secretName: {{ $rootCASecretName }}
+  renewal:
+    policy: Disabled
+  privateKey:
+    algorithm: RSA
+    encoding: PKCS1
+    size: 4096
+    rotationPolicy: Never
+  issuerRef:
+    kind: Issuer
+    name: {{ $rootSelfSignedIssuerName }}
+  usages:
+    - digital signature
+    - cert sign
+    - crl sign
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ $rootCAIssuerName }}
+  labels:
+    {{- include "hyperfleet-gateway.labels" . | nindent 4 }}
+spec:
+  ca:
+    secretName: {{ $rootCASecretName }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $authorinoAuthorizationServiceName }}
+  labels:
+    {{- include "hyperfleet-gateway.labels" . | nindent 4 }}
+spec:
+  secretName: {{ .Values.tls.authorinoAuthorizationTLSSecretName }}
+  privateKey:
+    rotationPolicy: Always
+  issuerRef:
+    name: {{ $rootCAIssuerName }}
+    kind: Issuer
+    group: cert-manager.io
+  dnsNames:
+    - {{ $authorinoAuthorizationServiceName }}
+    - {{ printf "%s.%s.svc" $authorinoAuthorizationServiceName .Release.Namespace }}
+    - {{ printf "%s.%s.svc.cluster.local" $authorinoAuthorizationServiceName .Release.Namespace }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $authorinoOIDCServiceName }}
+  labels:
+    {{- include "hyperfleet-gateway.labels" . | nindent 4 }}
+spec:
+  secretName: {{ .Values.tls.authorinoOIDCTLSSecretName }}
+  privateKey:
+    rotationPolicy: Always
+  issuerRef:
+    name: {{ $rootCAIssuerName }}
+    kind: Issuer
+    group: cert-manager.io
+  dnsNames:
+    - {{ $authorinoOIDCServiceName }}
+    - {{ printf "%s.%s.svc" $authorinoOIDCServiceName .Release.Namespace }}
+    - {{ printf "%s.%s.svc.cluster.local" $authorinoOIDCServiceName .Release.Namespace }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: hyperfleet-api
+  labels:
+    {{- include "hyperfleet-gateway.labels" . | nindent 4 }}
+spec:
+  secretName: {{ .Values.tls.hyperfleetApiTLSSecretName }}
+  privateKey:
+    rotationPolicy: Always
+  issuerRef:
+    name: {{ $rootCAIssuerName }}
+    kind: Issuer
+    group: cert-manager.io
+  dnsNames:
+    - {{ .Values.envoy.upstream.host }}
+    - {{ printf "%s.%s.svc" .Values.envoy.upstream.host .Release.Namespace }}
+    - {{ printf "%s.%s.svc.cluster.local" .Values.envoy.upstream.host .Release.Namespace }}

@@ -109,11 +109,37 @@ data:
                         socket_address:
                           address: {{ printf "%s-authorino-authorization" (include "hyperfleet-gateway.authorinoName" .) }}.{{ .Release.Namespace }}.svc.cluster.local
                           port_value: {{ .Values.auth.extAuthz.port }}
+          transport_socket:
+            name: envoy.transport_sockets.tls
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+              sni: {{ printf "%s-authorino-authorization.%s.svc" (include "hyperfleet-gateway.authorinoName" .) .Release.Namespace }}
+              common_tls_context:
+                validation_context:
+                  trusted_ca:
+                    filename: /etc/envoy/tls/ca.crt
+                  match_typed_subject_alt_names:
+                    - san_type: DNS
+                      matcher:
+                        exact: {{ printf "%s-authorino-authorization.%s.svc" (include "hyperfleet-gateway.authorinoName" .) .Release.Namespace }}
         {{- end }}
         - name: upstream
           connect_timeout: 10s
           type: STRICT_DNS
           lb_policy: ROUND_ROBIN
+          transport_socket:
+            name: envoy.transport_sockets.tls
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+              sni: {{ printf "%s.%s.svc" .Values.envoy.upstream.host .Release.Namespace }}
+              common_tls_context:
+                validation_context:
+                  trusted_ca:
+                    filename: /etc/envoy/tls/ca.crt
+                  match_typed_subject_alt_names:
+                    - san_type: DNS
+                      matcher:
+                        exact: {{ printf "%s.%s.svc" .Values.envoy.upstream.host .Release.Namespace }}
           load_assignment:
             cluster_name: upstream
             endpoints:
