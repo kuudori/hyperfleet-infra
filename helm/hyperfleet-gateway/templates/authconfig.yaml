@@ -157,15 +157,6 @@ spec:
                 expression: {{ printf "%s in auth.identity ? auth.identity[%s] : ''" ($cfg.optional.claim | toJson) ($cfg.optional.claim | toJson) | quote }}
       {{- end }}
       headers:
-        {{- if eq .Values.auth.mode "EDGE" }}
-        # Rewrite the machine credential only after successful authentication.
-        # EDGE+API replaces all credentials with a wristband in Envoy.
-        Authorization:
-          when:
-            - predicate: request.headers['authorization'].startsWith('ServiceAccount ')
-          plain:
-            expression: "request.headers['authorization'].replace('ServiceAccount ', 'Bearer ')"
-        {{- end }}
         # "true" for machine callers (hyperfleet-components), "false" for humans.
         x-hyperfleet-system:
           plain:
