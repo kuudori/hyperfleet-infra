@@ -1,4 +1,3 @@
-{{- include "hyperfleet-gateway.validateSecurity" . }}
 apiVersion: v1
 kind: ConfigMap
 metadata:

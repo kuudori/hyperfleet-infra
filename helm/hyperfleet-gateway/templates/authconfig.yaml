@@ -4,15 +4,6 @@
 {{- if not $cfg }}
 {{- fail (printf "tenant.model %q not found in .Values.tenant.models (expected e.g. onprem|oracle)" $model) }}
 {{- end }}
-{{- if not .Values.auth.machineIdentity.allowedServiceAccounts }}
-{{- fail "auth.machineIdentity.allowedServiceAccounts must not be empty" }}
-{{- end }}
-{{- if not .Values.auth.machineIdentity.audience }}
-{{- fail "auth.machineIdentity.audience must not be empty" }}
-{{- end }}
-{{- if not .Values.auth.identityProviders }}
-{{- fail "auth.identityProviders must contain at least one human identity provider in edge modes" }}
-{{- end }}
 {{- $allowedServiceAccountsPattern := list }}
 {{- range .Values.auth.machineIdentity.allowedServiceAccounts }}
 {{- $allowedServiceAccountsPattern = append $allowedServiceAccountsPattern (regexQuoteMeta .) }}
@@ -27,16 +18,10 @@
 {{- fail (printf "Duplicate identity provider name %q" .name) }}
 {{- end }}
 {{- $_ := set $providerNames .name true }}
-{{- if and (not (regexMatch "^https://[^/]+" .issuerUrl)) (not (and .allowInsecureIssuer (regexMatch "^http://[^/]+" .issuerUrl))) }}
-{{- fail (printf "Identity provider %q requires an HTTPS issuerUrl (or an explicit test-only HTTP issuer)" .name) }}
-{{- end }}
 {{- if hasKey $providerIssuers .issuerUrl }}
 {{- fail (printf "Duplicate identity provider issuerUrl %q" .issuerUrl) }}
 {{- end }}
 {{- $_ = set $providerIssuers .issuerUrl true }}
-{{- if not .audience }}
-{{- fail (printf "Identity provider %q requires an audience" .name) }}
-{{- end }}
 {{- end }}
 # Gateway auth policy (stable name; tenant model swap replaces in place).
 apiVersion: authorino.kuadrant.io/v1beta3

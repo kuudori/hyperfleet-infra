@@ -85,6 +85,22 @@ tls:
   hyperfleetApiTLSSecretName: hyperfleet-api-server-cert
   authorinoAuthorizationTLSSecretName: authorino-server-cert
   authorinoOIDCTLSSecretName: authorino-oidc-server-cert
+  # Helm cannot natively wait for cert-manager Certificate custom resources.
+  # A post-install/upgrade Job blocks dependent Helmfile releases until the
+  # Secrets consumed by Envoy, Authorino, and hyperfleet-api are issued.
+  certificateWaiter:
+    enabled: true
+    image:
+      repository: alpine/k8s@sha256:15cfdf84d6de3559bc54d7479eb4e8aadbf71f6d7f08782cb1e91f3446f4b2d8
+      pullPolicy: IfNotPresent
+    timeoutSeconds: 300
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        cpu: 100m
+        memory: 64Mi
 
 # -----------------------------------------------------------------------------
 # Envoy — gateway/proxy behavior knobs that are customized
@@ -134,22 +150,26 @@ auth:
     image: quay.io/kuadrant/authorino:v0.26.2
     # Empty: gateway Service DNS + localhost (see authconfig.yaml).
     hosts: []
+    # Test-only CA mounted into Authorino's Go system trust directory when
+    # Helmfile selects the self-signed mock issuer over HTTPS.
+    mockIssuerCASecretName: ""
     logging:
       level: info
 
-  # Shared with API mode by Helmfile. Empty permits only allowed SA callers.
+  # Required in EDGE and EDGE+API modes. Helmfile supplies the human provider.
   identityProviders: []
   # - name: human-jwt
   #   issuerUrl: https://idp.example.com/realms/hyperfleet
   #   allowInsecureIssuer: false # test-only mock issuer exception
-  #   jwksUrl: https://idp.example.com/realms/hyperfleet/protocol/openid-connect/certs
   #   audience: hyperfleet-api
   #   identityClaim: sub
   #   identityClaimPattern: ""
 
   # Fixed Festival Wristband settings. The signing Secret contains key.pem
-  # (PKCS#1 RSA private key) and is provisioned once by
+  # (traditional PKCS#1 RSA private key, required by the pinned Authorino
+  # version) and is provisioned once by
   # make ensure-wristband-signing-key. It is separate from every TLS private key.
+  # HYPERFLEET-1523 owns any signing-key rotation design; this PR preserves it.
   wristband:
     signingKeySecretName: hyperfleet-wristband-signing-key
     audience: hyperfleet-api

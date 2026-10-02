@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Mint a short-lived projected ServiceAccount token for gateway TokenReview.
+# Mint a short-lived projected ServiceAccount token for gateway TokenReview or
+# direct API JWT authentication.
 # The JWT is the only stdout output. Diagnostics are written to stderr.
 
 set -euo pipefail
@@ -31,8 +32,8 @@ if [[ -z "$NAMESPACE" ]]; then
     echo "ERROR: NAMESPACE is required" >&2
     exit 1
 fi
-if [[ "$AUTH_MODE" != "EDGE" && "$AUTH_MODE" != "EDGE+API" ]]; then
-    echo "ERROR: mint-machine-token requires AUTH_MODE=EDGE or EDGE+API" >&2
+if [[ "$AUTH_MODE" != "API" && "$AUTH_MODE" != "EDGE" && "$AUTH_MODE" != "EDGE+API" ]]; then
+    echo "ERROR: mint-machine-token requires AUTH_MODE=API, EDGE, or EDGE+API" >&2
     exit 1
 fi
 if [[ ! "$MACHINE_SERVICE_ACCOUNT" =~ ^[a-z0-9]([a-z0-9-]{0,251}[a-z0-9])?$ ]]; then

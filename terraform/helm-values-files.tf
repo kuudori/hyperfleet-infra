@@ -54,18 +54,3 @@ resource "local_file" "sentinel_values" {
 
   file_permission = "0644"
 }
-
-# Write OIDC env file — consumed by the Makefile (included before env.gcp) for
-# edge human authentication and API-mode Kubernetes ServiceAccount validation.
-resource "local_file" "oidc_env" {
-  count = var.cloud_provider == "gke" ? 1 : 0
-
-  filename        = "${local.helm_values_dir}/oidc.env"
-  file_permission = "0644"
-  content         = <<-EOT
-    OIDC_ISSUER_URL ?= ${module.gke_cluster[0].oidc_issuer_url}
-    OIDC_JWKS_URL ?= ${module.gke_cluster[0].oidc_issuer_url}/jwks
-    KUBERNETES_OIDC_ISSUER_URL ?= ${module.gke_cluster[0].oidc_issuer_url}
-    KUBERNETES_OIDC_JWKS_URL ?= ${module.gke_cluster[0].oidc_issuer_url}/jwks
-  EOT
-}

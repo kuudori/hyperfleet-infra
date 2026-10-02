@@ -103,8 +103,8 @@ Configuration precedence (highest to lowest):
 | `make install-authorino-operator` | Install the pinned Kuadrant Authorino operator (cluster-wide; prerequisite for gateway ext_authz) |
 | `make uninstall-authorino-operator` | Uninstall the Authorino operator |
 | `make switch-tenant-model` | Switch the active tenant model (`TENANT_MODEL=onprem\|oracle`); re-applies the gateway AuthConfig and API together |
-| `make mint-human-token` | Mint a test-only JWT from the mock issuer |
-| `make mint-machine-token` | Mint a short-lived ServiceAccount JWT for the gateway TokenReview flow |
+| `make mint-human-token` | Mint a test-only JWT from the mock issuer (API, EDGE, or EDGE+API) |
+| `make mint-machine-token` | Mint a short-lived ServiceAccount JWT for API or gateway authentication |
 | `make check-human-token` | Verify human JWT tenant propagation, audience enforcement, and missing-claim denial |
 
 When `AUTH_MODE=EDGE` or `AUTH_MODE=EDGE+API`, `make install-hyperfleet` installs the Authorino
@@ -285,14 +285,14 @@ Choose an OIDC issuer for human users and confirm that its tokens contain the
 claims required by your tenant model. The issuer mode is explicit and is
 reported by the install validation step:
 
-| `HELMFILE_ENV` | Default `OIDC_ISSUER_MODE` | Issuer used by the gateway |
+| `HELMFILE_ENV` | Default `OIDC_ISSUER_MODE` | Mock human issuer used by API/gateway |
 | -------------- | -------------------------- | --------------------------- |
 | `kind` / `e2e-kind` | `mock` | Namespace-local `hyperfleet-mock-oidc` Service |
 | `e2e-gcp` | `mock` | Namespace-local `hyperfleet-mock-oidc` Service |
 | `gcp` | `external` | Terraform-generated or CLI-supplied HTTPS issuer |
 
 Mock mode is test-only. It uses the pinned `navikt/mock-oauth2-server` image,
-keeps the issuer behind a ClusterIP Service, allows ingress only from Authorino
+keeps the TLS issuer behind a ClusterIP Service, allows ingress only from Authorino
 and the labeled token helper, and uses in-memory signing keys. A mock issuer
 restart invalidates previously minted tokens, so mint a fresh token after every
 rollout. Set `OIDC_ISSUER_MODE=external` to use a real issuer in any environment.

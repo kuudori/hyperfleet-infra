@@ -74,18 +74,36 @@ commonLabels:
 {{ fail "AUTH_MODE must be NONE, EDGE, API, or EDGE+API" }}
 {{ end }}
 {{- $edgeAuth := has .Values.authMode (list "EDGE" "EDGE+API") -}}
+{{- $oidcAuth := has .Values.authMode (list "EDGE" "API" "EDGE+API") -}}
 {{- $oidcIssuerMode := env "OIDC_ISSUER_MODE" | default "external" -}}
 {{- if not (has $oidcIssuerMode (list "mock" "external")) }}
 {{ fail "OIDC_ISSUER_MODE must be mock or external" }}
 {{- end }}
-{{- if and $edgeAuth (eq $oidcIssuerMode "mock") (not (has .Environment.Name (list "kind" "e2e-kind" "e2e-gcp"))) }}
+{{- if and $oidcAuth (eq $oidcIssuerMode "mock") (not (has .Environment.Name (list "kind" "e2e-kind" "e2e-gcp"))) }}
 {{ fail "OIDC_ISSUER_MODE=mock is test-only and allowed only in kind, e2e-kind, or e2e-gcp" }}
 {{- end }}
-{{- if and $edgeAuth (eq $oidcIssuerMode "mock") (env "OIDC_ISSUER_URL") }}
-{{ fail "OIDC_ISSUER_URL must be empty with OIDC_ISSUER_MODE=mock in edge modes" }}
+{{- if and $oidcAuth (eq $oidcIssuerMode "mock") (env "OIDC_ISSUER_URL") }}
+{{ fail "OIDC_ISSUER_URL must be empty with OIDC_ISSUER_MODE=mock in authenticated modes" }}
 {{- end }}
 {{- if and $edgeAuth (eq $oidcIssuerMode "external") (not (regexMatch "^https://[^[:space:]]+$" (env "OIDC_ISSUER_URL"))) }}
 {{ fail "OIDC_ISSUER_URL must be a non-empty https:// URL with OIDC_ISSUER_MODE=external in edge modes" }}
+{{- end }}
+{{- if and (env "OIDC_JWKS_URL") (not (env "OIDC_ISSUER_URL")) }}
+{{ fail "OIDC_JWKS_URL is set without OIDC_ISSUER_URL" }}
+{{- end }}
+{{- if and (env "OIDC_ISSUER_URL") (not (regexMatch "^https://[^[:space:]]+$" (env "OIDC_ISSUER_URL"))) }}
+{{ fail "OIDC_ISSUER_URL must be an https:// URL" }}
+{{- end }}
+{{- if and (env "OIDC_JWKS_URL") (not (regexMatch "^https://[^[:space:]]+$" (env "OIDC_JWKS_URL"))) }}
+{{ fail "OIDC_JWKS_URL must be an https:// URL" }}
+{{- end }}
+{{- $tenantIsolationEnabled := eq (env "TENANT_ISOLATION_ENABLED" | default "false") "true" -}}
+{{- if and $tenantIsolationEnabled (not $edgeAuth) }}
+{{ fail "TENANT_ISOLATION_ENABLED=true requires AUTH_MODE=EDGE or EDGE+API" }}
+{{- end }}
+{{- $tenantModel := env "TENANT_MODEL" | default "onprem" -}}
+{{- if and (or $edgeAuth $tenantIsolationEnabled) (not (has $tenantModel (list "onprem" "oracle"))) }}
+{{ fail "TENANT_MODEL must be onprem or oracle when edge auth or tenant isolation is enabled" }}
 {{- end }}
 repositories:
   - name: hyperfleet-api
@@ -123,11 +141,13 @@ releases:
   - name: hyperfleet-mock-oidc
     namespace: {{ .Values.namespace }}
     chart: ../helm/mock-oidc
-    installed: {{ and $edgeAuth (eq $oidcIssuerMode "mock") }}
+    installed: {{ and $oidcAuth (eq $oidcIssuerMode "mock") }}
     labels:
       component: mock-oidc
     values:
       - fullnameOverride: hyperfleet-mock-oidc
+        tls:
+          enabled: {{ and $oidcAuth (eq $oidcIssuerMode "mock") }}
 
   # Desire delivery resources stay in Helmfile state when disabled, so a mode
   # change or teardown removes releases installed by the previous mode.
@@ -164,6 +184,9 @@ releases:
     # It must exist before the API mounts its serving certificate and CA bundle.
     needs:
       - hyperfleet-gateway
+{{ if and (eq .Values.authMode "API") (eq $oidcIssuerMode "mock") }}
+      - hyperfleet-mock-oidc
+{{ end }}
     labels:
       component: api
     values:

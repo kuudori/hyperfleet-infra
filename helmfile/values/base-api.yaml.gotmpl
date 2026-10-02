@@ -9,12 +9,17 @@ replicaCount: 2
 {{ $wristbandMode := eq $authMode "EDGE+API" }}
 {{ $tenantIsolationEnabled := eq (env "TENANT_ISOLATION_ENABLED" | default "false") "true" }}
 {{ $tenantModel := env "TENANT_MODEL" | default "onprem" }}
-{{ $defaultKubernetesIssuer := "https://kubernetes.default.svc.cluster.local" }}
-{{ $kubernetesIssuer := env "KUBERNETES_OIDC_ISSUER_URL" | default $defaultKubernetesIssuer }}
-{{ $kubernetesJWKS := env "KUBERNETES_OIDC_JWKS_URL" | default "https://kubernetes.default.svc.cluster.local/openid/v1/jwks" }}
-{{ $kubernetesCAFile := env "KUBERNETES_OIDC_CA_FILE" | default "" }}
-{{ if and (eq $kubernetesIssuer $defaultKubernetesIssuer) (not $kubernetesCAFile) }}
-{{ $kubernetesCAFile = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt" }}
+{{ $kubernetesOIDC := dict }}
+{{ $mockOIDC := and (eq $authMode "API") (eq (env "OIDC_ISSUER_MODE" | default "external") "mock") }}
+{{ $mockIssuer := printf "https://hyperfleet-mock-oidc.%s.svc.cluster.local:8443/default" .Release.Namespace }}
+{{ $mockJWKS := printf "%s/jwks" $mockIssuer }}
+{{ if eq $authMode "API" }}
+{{/*
+  Discover the selected cluster's public OIDC endpoints only for direct API
+  authentication. The script also enables Kind's standard issuer-discovery
+  ClusterRole for anonymous callers, matching GKE's public OIDC endpoints.
+*/}}
+{{ $kubernetesOIDC = (exec "../../scripts/discover-kubernetes-oidc.sh" (list .Release.Namespace) | fromYaml) }}
 {{ end }}
 {{ $wristbandIssuer := printf "https://authorino-authorino-oidc.%s.svc:8083/%s/hyperfleet-tenant-policy/wristband" .Release.Namespace .Release.Namespace }}
 {{ $wristbandJWKS := printf "%s/.well-known/openid-connect/certs" $wristbandIssuer }}
@@ -64,6 +69,14 @@ extraVolumes:
         - key: ca.crt
           path: ca.crt
 {{ end }}
+{{ if $mockOIDC }}
+  - name: mock-oidc-ca
+    secret:
+      secretName: hyperfleet-mock-oidc-tls
+      items:
+        - key: tls.crt
+          path: ca.crt
+{{ end }}
 extraVolumeMounts:
   - name: api-tls
     mountPath: /etc/hyperfleet/tls
@@ -71,6 +84,11 @@ extraVolumeMounts:
 {{ if $wristbandMode }}
   - name: gateway-ca
     mountPath: /etc/hyperfleet/gateway-ca
+    readOnly: true
+{{ end }}
+{{ if $mockOIDC }}
+  - name: mock-oidc-ca
+    mountPath: /etc/hyperfleet/mock-oidc-ca
     readOnly: true
 {{ end }}
 
@@ -175,24 +193,33 @@ config:
           jwk_cert_ca_file: /etc/hyperfleet/gateway-ca/ca.crt
           audience: hyperfleet-api
           identity_claim: sub
-          identity_header: X-HyperFleet-Identity
       {{ else }}
-        # API mode validates projected ServiceAccount JWTs directly.
-        - issuer_url: {{ $kubernetesIssuer | quote }}
-          jwk_cert_url: {{ $kubernetesJWKS | quote }}
-          {{ if $kubernetesCAFile }}
-          jwk_cert_ca_file: {{ $kubernetesCAFile | quote }}
-          {{ end }}
-          header: "Authorization"
+        # API mode validates ServiceAccount JWTs using the selected cluster's
+        # publicly available OIDC discovery endpoint and advertised JWKS URL.
+        - issuer_url: {{ index $kubernetesOIDC "issuer_url" | quote }}
+          jwk_cert_url: {{ index $kubernetesOIDC "jwk_cert_url" | quote }}
+          jwk_cert_ca_file: {{ index $kubernetesOIDC "jwk_cert_ca_file" | quote }}
+          header: Authorization
           audience: hyperfleet-api
           identity_claim: sub
-          identity_claim_pattern: "^system:serviceaccount:{{ .Release.Namespace }}:.*$"
+          identity_claim_pattern: {{ index $kubernetesOIDC "identity_claim_pattern" | quote }}
+        {{ if $mockOIDC }}
+        - issuer_url: {{ $mockIssuer | quote }}
+          jwk_cert_url: {{ $mockJWKS | quote }}
+          jwk_cert_ca_file: /etc/hyperfleet/mock-oidc-ca/ca.crt
+          audience: hyperfleet-api
+          identity_claim: email
+        {{ else }}
         {{ if env "OIDC_ISSUER_URL" }}
+        {{ if not (env "OIDC_JWKS_URL") }}
+        {{ fail "OIDC_JWKS_URL is required when OIDC_ISSUER_URL is set for the human provider" }}
+        {{ end }}
         # Optional human OIDC provider for direct API authentication.
         - issuer_url: {{ env "OIDC_ISSUER_URL" | quote }}
           jwk_cert_url: {{ env "OIDC_JWKS_URL" | quote }}
           audience: hyperfleet-api
-          identity_claim: sub
+          identity_claim: email
+        {{ end }}
         {{ end }}
       {{ end }}
     {{ end }}

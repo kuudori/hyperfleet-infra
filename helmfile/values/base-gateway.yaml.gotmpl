@@ -37,15 +37,14 @@ auth:
   identityProviders:
   {{- if and $edgeAuth $mockIssuer }}
     - name: human-jwt
-      issuerUrl: {{ printf "http://hyperfleet-mock-oidc.%s.svc.cluster.local:8080/default" .Values.namespace | quote }}
-      allowInsecureIssuer: true
+      issuerUrl: {{ printf "https://hyperfleet-mock-oidc.%s.svc.cluster.local:8443/default" .Values.namespace | quote }}
       audience: hyperfleet-api
-      identityClaim: sub
+      identityClaim: email
   {{- else if and $edgeAuth (env "OIDC_ISSUER_URL") }}
     - name: human-jwt
       issuerUrl: {{ env "OIDC_ISSUER_URL" | quote }}
       audience: hyperfleet-api
-      identityClaim: sub
+      identityClaim: email
   {{- else }}
     []
   {{- end }}
@@ -64,6 +63,9 @@ auth:
       {{- end }}
 
   authorino:
+    {{- if and $edgeAuth $mockIssuer }}
+    mockIssuerCASecretName: hyperfleet-mock-oidc-tls
+    {{- end }}
     {{/*
       Authorino matches the AuthConfig against the request authority. The chart
       defaults to the in-cluster gateway Service DNS + localhost; set AUTHORINO_HOSTS
