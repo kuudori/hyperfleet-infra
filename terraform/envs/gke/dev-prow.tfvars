@@ -43,6 +43,12 @@ node_count   = 1               # Start with 1 node for dev
 machine_type = "e2-standard-4" # 4 vCPU, 16GB RAM
 use_spot_vms = false           # ~70% cost savings, may be preempted
 
+# Headroom for overlapping nightlies, idles back to 1 node
+autoscaling = {
+  min_node_count = 1
+  max_node_count = 3
+}
+
 # IMPORTANT: Enable deletion protection for this shared long-running cluster
 # This prevents accidental deletion via terraform destroy
 # To destroy, you must first set this to false, apply, then destroy

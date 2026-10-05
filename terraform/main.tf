@@ -30,6 +30,7 @@ module "gke_cluster" {
   machine_type = var.machine_type
   use_spot_vms = var.use_spot_vms
   labels       = local.common_labels
+  autoscaling  = var.autoscaling
 
   # Dataplane V2 by default, shared clusters created before it override this
   datapath_provider            = var.datapath_provider

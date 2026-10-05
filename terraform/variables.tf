@@ -80,6 +80,15 @@ variable "maintenance_recurring_window" {
   default = null
 }
 
+variable "autoscaling" {
+  description = "Node pool autoscaling limits. Null disables autoscaling and keeps node_count fixed"
+  type = object({
+    min_node_count = number
+    max_node_count = number
+  })
+  default = null
+}
+
 variable "enable_deletion_protection" {
   description = "Enable deletion protection for the cluster (recommended for shared/production clusters like Prow)"
   type        = bool

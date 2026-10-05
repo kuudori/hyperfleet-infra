@@ -83,7 +83,16 @@ resource "google_container_node_pool" "primary" {
   cluster  = google_container_cluster.primary.name
   project  = var.project_id
 
-  node_count = var.node_count
+  # Unset when autoscaling is on, so Terraform doesn't fight the autoscaler on every apply
+  node_count = var.autoscaling == null ? var.node_count : null
+
+  dynamic "autoscaling" {
+    for_each = var.autoscaling == null ? [] : [var.autoscaling]
+    content {
+      min_node_count = autoscaling.value.min_node_count
+      max_node_count = autoscaling.value.max_node_count
+    }
+  }
 
   node_config {
     machine_type    = var.machine_type
