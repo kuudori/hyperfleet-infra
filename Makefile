@@ -262,12 +262,33 @@ install-maestro-all: install-maestro create-maestro-consumer ## Install Maestro 
 .PHONY: uninstall-applied-manifest-crd
 uninstall-applied-manifest-crd: check-kubectl ## Uninstall AppliedManifestWorks CRD (for Maestro)
 	@echo "Uninstalling AppliedManifestWorks CRD..."
-	@kubectl delete -f https://raw.githubusercontent.com/open-cluster-management-io/api/main/work/v1/0000_01_work.open-cluster-management.io_appliedmanifestworks.crd.yaml --request-timeout=30s --timeout 5m
+	@kubectl delete -f https://raw.githubusercontent.com/open-cluster-management-io/api/main/work/v1/0000_01_work.open-cluster-management.io_appliedmanifestworks.crd.yaml --ignore-not-found --request-timeout=30s --timeout 5m
 	@echo "OK: AppliedManifestWorks CRD uninstalled"
 
 .PHONY: uninstall-maestro
 uninstall-maestro: check-helm uninstall-applied-manifest-crd ## Uninstall Maestro
 	helm uninstall $(MAESTRO_NAMESPACE)-maestro --namespace $(MAESTRO_NAMESPACE) || true
+
+# Desire delivery runs without Maestro, so the kind targets skip it (and the
+# AppliedManifestWorks CRD it brings) when DESIRE_DELIVERY_ENABLED=true.
+.PHONY: maybe-install-maestro-all
+maybe-install-maestro-all: check-desire-delivery-env
+ifeq ($(strip $(DESIRE_DELIVERY_ENABLED)),true)
+	@echo "[NOTE: Skipping Maestro install (DESIRE_DELIVERY_ENABLED=true)]"
+else
+	$(MAKE) install-maestro-all
+endif
+
+# Fails before any cluster work when the toggle is set for an environment that
+# has no desire adapter set; Helmfile enforces the same rule at render time.
+.PHONY: check-desire-delivery-env
+check-desire-delivery-env: ## Verify DESIRE_DELIVERY_ENABLED=true is used only with e2e-kind or e2e-gcp
+	@if [ "$(strip $(DESIRE_DELIVERY_ENABLED))" = "true" ]; then \
+		case "$(HELMFILE_ENV)" in \
+			e2e-kind|e2e-gcp) ;; \
+			*) echo "ERROR: DESIRE_DELIVERY_ENABLED=true is supported only with HELMFILE_ENV=e2e-kind or e2e-gcp (got '$(HELMFILE_ENV)')"; exit 1 ;; \
+		esac; \
+	fi
 
 
 # ==== Gateway Security Targets ====
@@ -410,7 +431,7 @@ install-adapters: check-helmfile-env ## Install Hyperfleet Adapters
 	helmfile apply -f helmfile/helmfile.yaml.gotmpl -e $(HELMFILE_ENV) -l component=adapter
 
 .PHONY: uninstall-hyperfleet
-uninstall-hyperfleet: check-kubectl-context ## Uninstall all HyperFleet components
+uninstall-hyperfleet: check-desire-delivery-env check-kubectl-context ## Uninstall all HyperFleet components
 	helmfile -f helmfile/helmfile.yaml.gotmpl -e $(HELMFILE_ENV) destroy
 
 .PHONY: uninstall-api
@@ -580,7 +601,7 @@ check-jq: ## Verify jq is installed
 	@echo "OK: jq found"
 
 .PHONY: check-helmfile-env
-check-helmfile-env: check-helmfile check-kubectl-context check-helmfile-env-generated ## Verify kubectl context and generated values directory exists
+check-helmfile-env: check-desire-delivery-env check-helmfile check-kubectl-context check-helmfile-env-generated ## Verify kubectl context and generated values directory exists
 
 .PHONY: check-helmfile-env-generated
 check-helmfile-env-generated: ## Check that the generated directory exists based on HELMFILE_ENV
@@ -968,12 +989,48 @@ validate-namespace-cleaner: check-helm ## Validate namespace-cleaner Helm chart 
 .PHONY: ci-validate
 ci-validate: validate-terraform lint-helm lint-shellcheck validate-authorino ## Ci validate: validate terraform (all stacks) + lint helm + lint shellcheck + validate authorino
 
+# validate-desire-delivery renders the opt-in desire delivery stack
+# (DESIRE_DELIVERY_ENABLED=true) for both e2e environments and checks that the
+# run has no Maestro path: no Maestro release or adapter in the Helmfile state,
+# and every cl-desire transport is remote with target_cluster set to the run
+# namespace, which is the store partition the applier serves. The build needs
+# no charts; the template renders only cl-desire and the applier (against its
+# chart schema), so only those two charts are fetched.
+.PHONY: validate-desire-delivery
+validate-desire-delivery: check-helm ## Validate the desire delivery render (no Maestro, remote transport, run-namespace partition)
+	@echo "Validating desire delivery render..."
+	@for env in e2e-kind e2e-gcp; do \
+		ns=hf-validate-$$env; \
+		export NAMESPACE=$$ns RUN_ID=$$ns DESIRE_DELIVERY_ENABLED=true OIDC_ISSUER_MODE=mock OIDC_ISSUER_URL=; \
+		build=$$(helmfile -f helmfile/helmfile.yaml.gotmpl -e $$env build) \
+			|| { echo "ERROR: Helmfile desire delivery build failed for $$env"; exit 1; }; \
+		if echo "$$build" | grep -qi maestro; then \
+			echo "ERROR ($$env): desire delivery Helmfile state references Maestro"; exit 1; \
+		fi; \
+		out=$$(helmfile -f helmfile/helmfile.yaml.gotmpl -e $$env -l name=cl-desire -l name=hyperfleet-applier template) \
+			|| { echo "ERROR: Helmfile desire delivery template failed for $$env"; exit 1; }; \
+		cfg=$$(echo "$$out" | awk ' \
+			/^---/ { if (keep) printf "%s", doc; doc = ""; keep = 0; next } \
+			{ doc = doc $$0 "\n" } \
+			/^  name: cl-desire-hyperfleet-adapter-config$$/ { keep = 1 } \
+			END { if (keep) printf "%s", doc }'); \
+		[ -n "$$cfg" ] || { echo "ERROR ($$env): cl-desire adapter config ConfigMap was not rendered"; exit 1; }; \
+		echo "$$cfg" | awk -v ns="$$ns" ' \
+			/^    [^ #]/ { in_transports = ($$0 ~ /^    transports:/); next } \
+			in_transports && /^        type:/ { types++; if ($$2 != "remote") bad = 1 } \
+			in_transports && /^        target_cluster:/ { targets++; v = $$2; gsub(/"/, "", v); if (v != ns) bad = 1 } \
+			END { exit !(types > 0 && targets == types && !bad) }' \
+			|| { echo "ERROR ($$env): every cl-desire transport must be type remote with target_cluster \"$$ns\""; exit 1; }; \
+		echo "OK: $$env desire delivery render has no Maestro and routes cl-desire to partition $$ns"; \
+	done
+
 .PHONY: ci-dry-run
-ci-dry-run: ci-validate ## Ci dry-run: ci-validate + validate maestro + validate network policies + validate namespace cleaner + validate mock OIDC
+ci-dry-run: ci-validate ## Ci dry-run: ci-validate + validate maestro + validate network policies + validate namespace cleaner + validate mock OIDC + validate desire delivery
 	$(MAKE) validate-maestro
 	$(MAKE) validate-mock-oidc
 	$(MAKE) validate-network-policies
 	$(MAKE) validate-namespace-cleaner
+	$(MAKE) validate-desire-delivery
 
 .PHONY: health-check-maestro
 health-check-maestro: check-kubectl ## Verify Maestro Components
@@ -985,6 +1042,34 @@ health-check-maestro: check-kubectl ## Verify Maestro Components
 			kubectl rollout status $$deploy --namespace $(MAESTRO_NAMESPACE) --kubeconfig $(KUBECONFIG) --timeout=300s || exit 1; \
 		done
 	@echo "OK: all components healthy"
+
+.PHONY: health-check-desire-delivery
+health-check-desire-delivery: check-kubectl ## Verify desire delivery components (Redis + applier); on kind, also verify Maestro is absent
+	@echo "Checking desire delivery components..."
+	kubectl rollout status deployment/redis --namespace $(NAMESPACE) --kubeconfig $(KUBECONFIG) --timeout=300s
+	@# Found by release label: the Deployment name is shortened for long namespaces
+	@applier=$$(kubectl get deployment -l app.kubernetes.io/instance=hyperfleet-applier -o name --namespace $(NAMESPACE) --kubeconfig $(KUBECONFIG)) \
+		|| { echo "ERROR: failed to look up the hyperfleet-applier Deployment"; exit 1; }; \
+	[ -n "$$applier" ] || { echo "ERROR: no hyperfleet-applier Deployment in namespace $(NAMESPACE)"; exit 1; }; \
+	kubectl rollout status $$applier --namespace $(NAMESPACE) --kubeconfig $(KUBECONFIG) --timeout=300s
+	@if [ "$(HELMFILE_ENV)" = "e2e-kind" ]; then \
+		found=$$(kubectl get namespace $(MAESTRO_NAMESPACE) --ignore-not-found -o name --kubeconfig $(KUBECONFIG)) \
+			|| { echo "ERROR: failed to look up namespace $(MAESTRO_NAMESPACE)"; exit 1; }; \
+		[ -z "$$found" ] || { echo "ERROR: namespace $(MAESTRO_NAMESPACE) exists; desire delivery on kind must run without Maestro"; exit 1; }; \
+		found=$$(kubectl get crd appliedmanifestworks.work.open-cluster-management.io --ignore-not-found -o name --kubeconfig $(KUBECONFIG)) \
+			|| { echo "ERROR: failed to look up the AppliedManifestWorks CRD"; exit 1; }; \
+		[ -z "$$found" ] || { echo "ERROR: the AppliedManifestWorks CRD is installed; desire delivery on kind must run without Maestro"; exit 1; }; \
+		echo "OK: no Maestro namespace or AppliedManifestWorks CRD on the cluster"; \
+	fi
+	@echo "OK: desire delivery components healthy"
+
+.PHONY: maybe-health-check-desire-delivery
+maybe-health-check-desire-delivery:
+ifneq ($(strip $(DESIRE_DELIVERY_ENABLED)),true)
+	@echo "[NOTE: Skipping desire delivery health check (DESIRE_DELIVERY_ENABLED != true)]"
+else
+	$(MAKE) health-check-desire-delivery
+endif
 
 .PHONY: ci-test
 ci-test: install-terraform get-credentials install-priority-classes install-maestro create-maestro-consumer health-check-maestro ## Ci test: install terraform + get credentials + install maestro + create maestro consumer + health check maestro
@@ -1006,14 +1091,14 @@ ci-cleanup: uninstall-maestro destroy-terraform ## Ci cleanup: uninstall maestro
 # Kind targets
 
 .PHONY: local-up-kind
-local-up-kind: create-kind-cluster install-kind-cilium kind-build-images install-priority-classes install-maestro-all generate-rabbitmq-values maybe-install-grafana maybe-install-tracing install-hyperfleet ## Full local kind setup
+local-up-kind: check-desire-delivery-env create-kind-cluster install-kind-cilium kind-build-images install-priority-classes maybe-install-maestro-all generate-rabbitmq-values maybe-install-grafana maybe-install-tracing install-hyperfleet maybe-health-check-desire-delivery ## Full local kind setup (DESIRE_DELIVERY_ENABLED=true: desire delivery instead of Maestro)
 
 .PHONY: local-down-kind
-local-down-kind: uninstall-hyperfleet uninstall-tracing uninstall-grafana uninstall-maestro delete-kind-cluster ## Tear down kind stack and delete cluster
+local-down-kind: check-desire-delivery-env uninstall-hyperfleet uninstall-tracing uninstall-grafana uninstall-maestro delete-kind-cluster ## Tear down kind stack and delete cluster
 
 # GKE targets
 .PHONY: local-up-gcp
-local-up-gcp: install-terraform get-credentials install-priority-classes install-maestro-all maybe-install-grafana maybe-install-tracing install-hyperfleet ## Full gke setup
+local-up-gcp: check-desire-delivery-env install-terraform get-credentials install-priority-classes install-maestro-all maybe-install-grafana maybe-install-tracing install-hyperfleet ## Full gke setup
 
 .PHONY: local-down-gcp
 local-down-gcp: get-credentials uninstall-hyperfleet uninstall-tracing uninstall-grafana uninstall-maestro destroy-terraform ## Tear down gke stack and destroy terraform

@@ -50,16 +50,29 @@ extraVolumeMounts:
     mountPath: /etc/hyperfleet/tls
     readOnly: true
 
+{{/*
+  required_adapters lists the adapters each environment deploys for a kind. An
+  environment can deploy none for a kind (the desire delivery set has no node
+  pool adapter), and the API chart schema rejects null, so render a list.
+*/}}
+{{- $clusterAdapters := list }}
+{{- $nodePoolAdapters := list }}
+{{- range .Values.adapters }}
+{{- if eq .resourceType "clusters" }}
+{{- $clusterAdapters = append $clusterAdapters .name }}
+{{- else if eq .resourceType "nodepools" }}
+{{- $nodePoolAdapters = append $nodePoolAdapters .name }}
+{{- end }}
+{{- end }}
 config:
   entities:
     - kind: Cluster
       plural: clusters
       spec_schema_name: ClusterSpec
       required_adapters:
-        {{- range .Values.adapters }}
-        {{- if eq .resourceType "clusters" }}
-        - {{ .name }}
-        {{- end }}
+        {{- if $clusterAdapters }}
+        {{- toYaml $clusterAdapters | nindent 8 }}
+        {{- else }} []
         {{- end }}
       references:
         - ref_type: wif_config
@@ -75,10 +88,9 @@ config:
       on_parent_delete: cascade
       spec_schema_name: NodePoolSpec
       required_adapters:
-        {{- range .Values.adapters }}
-        {{- if eq .resourceType "nodepools" }}
-        - {{ .name }}
-        {{- end }}
+        {{- if $nodePoolAdapters }}
+        {{- toYaml $nodePoolAdapters | nindent 8 }}
+        {{- else }} []
         {{- end }}
       name_min_len: 3
       name_max_len: 15
