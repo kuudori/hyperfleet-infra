@@ -1,0 +1,38 @@
+# Default values for redis
+# This is a SIMPLE chart for desire delivery testing only: one replica, no
+# persistence and no authentication. The store is reachable only inside the
+# cluster through a ClusterIP Service, and a NetworkPolicy admits only the
+# client pods in networkPolicy.allowedClients.
+
+image:
+  repository: redis
+  tag: 7-alpine
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 6379
+
+# Ingress to the store is limited to these client pods, each entry a set of
+# pod labels to match. An empty list denies all ingress.
+networkPolicy:
+  enabled: true
+  allowedClients: []
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    memory: 256Mi
+
+probes:
+  readiness:
+    initialDelaySeconds: 5
+    periodSeconds: 10
+  liveness:
+    initialDelaySeconds: 15
+    periodSeconds: 20
+    failureThreshold: 3

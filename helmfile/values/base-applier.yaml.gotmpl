@@ -1,0 +1,34 @@
+# Values for the hyperfleet-applier chart (DESIRE_DELIVERY_ENABLED=true).
+#
+# The chart schema sets additionalProperties: false at the top level, so only
+# keys the chart declares may appear here.
+
+image:
+  registry: {{ env "REGISTRY" | default "quay.io" }}
+  repository: {{ env "APPLIER_REPOSITORY" | default "redhat-services-prod/hyperfleet-tenant/hyperfleet/hyperfleet-applier" }}
+  tag: {{ env "APPLIER_IMAGE_TAG" | default "latest" }}
+  pullPolicy: {{ env "IMAGE_PULL_POLICY" | default "IfNotPresent" }}
+
+# The chart names its ClusterRole and ClusterRoleBinding after the fullname, so
+# the namespace keeps concurrent runs on a shared cluster from colliding. The
+# chart cuts the fullname at 63 characters, so a longer name is shortened here
+# with a hash of the namespace to stay unique.
+{{- $fullname := printf "hyperfleet-applier-%s" .Values.namespace }}
+{{- if gt (len $fullname) 63 }}
+{{- $fullname = printf "%s-%s" ($fullname | trunc 54 | trimSuffix "-") (.Values.namespace | sha256sum | trunc 8) }}
+{{- end }}
+fullnameOverride: {{ $fullname }}
+
+config:
+  # The store partition this applier serves. cl-desire writes its desires to the
+  # same partition (transport target_cluster in adapter-configs-desire.yaml.gotmpl).
+  managementCluster: {{ .Values.namespace | quote }}
+  pollInterval: 5s
+  redis:
+    url: {{ .Values.desireStoreUrl }}
+
+# Resource types the remote-two-resources example delivers.
+rbac:
+  allowlist:
+    - apiGroups: [""]
+      resources: ["namespaces", "configmaps"]

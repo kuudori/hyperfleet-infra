@@ -19,6 +19,22 @@
 {{- else -}}
 {{- fail (printf "OIDC_ISSUER_MODE=%q must be mock or external" $oidcIssuerMode) -}}
 {{- end }}
+{{- /*
+  Desire delivery (opt-in): Redis desire store + hyperfleet-applier, and the
+  single cl-desire adapter in place of the e2e adapter set. Only the e2e
+  environments define the desire adapter set; elsewhere the toggle would drop
+  Maestro from local-up-kind while the regular adapters still need it.
+
+  TODO(HYPERFLEET-1503): the toggle swaps which adapter set is in the Helmfile
+  state, so a destroy or apply with the other value leaves the previous set's
+  adapter releases installed. This lasts only while both sets exist; once the
+  Maestro-based e2e adapter sets are removed, drop the toggle and load the
+  desire adapter set unconditionally.
+*/ -}}
+{{- $desire := eq (env "DESIRE_DELIVERY_ENABLED" | default "false") "true" -}}
+{{- if and $desire (not (or (eq .Environment.Name "e2e-kind") (eq .Environment.Name "e2e-gcp"))) -}}
+{{- fail "DESIRE_DELIVERY_ENABLED=true is supported only with e2e-kind or e2e-gcp" -}}
+{{- end }}
 # Helmfile configuration
 # Documentation: https://helmfile.readthedocs.io/
 
@@ -37,6 +53,7 @@ values:
   - chartOrg: {{ env "CHART_ORG" | default "openshift-hyperfleet" }}
   # API audience shared by human JWTs and adapter/sentinel ServiceAccount tokens.
   - apiAudience: hyperfleet-api
+  - desireDeliveryEnabled: {{ $desire }}
   - charts:
       api:
         chartRef: {{ env "API_CHART_REF" | default "main" }}
@@ -44,6 +61,8 @@ values:
         chartRef: {{ env "SENTINEL_CHART_REF" | default "main" }}
       adapter:
         chartRef: {{ env "ADAPTER_CHART_REF" | default "main" }}
+      applier:
+        chartRef: {{ env "APPLIER_CHART_REF" | default "main" }}
 
 # Environment configurations - e2e, e2e-kind, kind, gcp
 environments:
@@ -53,14 +72,14 @@ environments:
         brokerType: googlepubsub
         gatewayServiceType: {{ env "GATEWAY_SERVICE_TYPE" | default "LoadBalancer" }}
         runId: {{ env "RUN_ID" | quote }}
-      - environments/e2e-gcp/adapter-configs.yaml.gotmpl
+      - {{ if $desire }}environments/adapter-configs-desire.yaml.gotmpl{{ else }}environments/e2e-gcp/adapter-configs.yaml.gotmpl{{ end }}
       - environments/e2e-gcp/sentinel-configs.yaml
   e2e-kind:
     values:
       - brokerType: rabbitmq
         gatewayServiceType: {{ env "GATEWAY_SERVICE_TYPE" | default "ClusterIP" }}
         runId: {{ env "RUN_ID" | quote }}
-      - environments/e2e-kind/adapter-configs.yaml.gotmpl
+      - {{ if $desire }}environments/adapter-configs-desire.yaml.gotmpl{{ else }}environments/e2e-kind/adapter-configs.yaml.gotmpl{{ end }}
       - environments/e2e-kind/sentinel-configs.yaml
   kind:
     values:
@@ -88,6 +107,13 @@ repositories:
     url: git+https://github.com/{{ .Values.chartOrg }}/hyperfleet-sentinel@charts?ref={{ .Values.charts.sentinel.chartRef }}&sparse=0
   - name: hyperfleet-adapter
     url: git+https://github.com/{{ .Values.chartOrg }}/hyperfleet-adapter@charts?ref={{ .Values.charts.adapter.chartRef }}&sparse=0
+{{ if .Values.desireDeliveryEnabled }}
+  # Declared only for desire delivery, so other runs never fetch it. Helmfile
+  # prepares charts only for installed releases and removes a disabled release
+  # by name, so the hyperfleet-applier release below needs no repository then.
+  - name: hyperfleet-applier
+    url: git+https://github.com/{{ .Values.chartOrg }}/hyperfleet-applier@charts?ref={{ .Values.charts.applier.chartRef }}&sparse=0
+{{ end }}
 
 releases:
   - name: external-dns
@@ -120,6 +146,35 @@ releases:
       component: mock-oidc
     values:
       - fullnameOverride: hyperfleet-mock-oidc
+
+  # Desire delivery (DESIRE_DELIVERY_ENABLED=true): the Redis desire store and
+  # the applier that serves this namespace's store partition. Both stay in state
+  # when disabled so Helmfile removes them on a toggle change or teardown.
+  - name: redis
+    namespace: {{ .Values.namespace }}
+    chart: ../helm/redis
+    installed: {{ .Values.desireDeliveryEnabled }}
+    labels:
+      component: redis
+    values:
+      # Only the store's clients: the cl-desire adapter and the applier
+      - networkPolicy:
+          allowedClients:
+            - app.kubernetes.io/name: hyperfleet-adapter
+              app.kubernetes.io/instance: cl-desire
+            - app.kubernetes.io/name: hyperfleet-applier
+              app.kubernetes.io/instance: hyperfleet-applier
+
+  - name: hyperfleet-applier
+    namespace: {{ .Values.namespace }}
+    chart: hyperfleet-applier/hyperfleet-applier
+    installed: {{ .Values.desireDeliveryEnabled }}
+    needs:
+      - redis
+    labels:
+      component: applier
+    values:
+      - values/base-applier.yaml.gotmpl
 
   # HyperFleet API
   - name: hyperfleet-api
