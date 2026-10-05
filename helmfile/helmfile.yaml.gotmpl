@@ -25,9 +25,9 @@
   environments define the desire adapter set; elsewhere the toggle would drop
   Maestro from local-up-kind while the regular adapters still need it.
 
-  TODO: the toggle swaps which adapter set is in the Helmfile state, so a
-  destroy or apply with the other value leaves the previous set's adapter
-  releases installed. This lasts only while both sets exist; once the
+  TODO(HYPERFLEET-1503): the toggle swaps which adapter set is in the Helmfile
+  state, so a destroy or apply with the other value leaves the previous set's
+  adapter releases installed. This lasts only while both sets exist; once the
   Maestro-based e2e adapter sets are removed, drop the toggle and load the
   desire adapter set unconditionally.
 */ -}}

@@ -1,5 +1,10 @@
 # Redis for desire delivery testing only.
 # No PersistentVolumeClaim: desires are lost when the pod is recreated.
+# Single replica only: each pod is a separate store, and the Service would
+# spread clients across them.
+{{- if ne (int .Values.replicaCount) 1 }}
+{{- fail (printf "replicaCount must be 1 (got %v): the Redis desire store supports only a single replica" .Values.replicaCount) }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -7,7 +12,7 @@ metadata:
   labels:
     {{- include "redis.labels" . | nindent 4 }}
 spec:
-  replicas: {{ .Values.replicaCount }}
+  replicas: 1
   selector:
     matchLabels:
       {{- include "redis.selectorLabels" . | nindent 6 }}

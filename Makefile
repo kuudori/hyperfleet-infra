@@ -283,10 +283,10 @@ endif
 # has no desire adapter set; Helmfile enforces the same rule at render time.
 .PHONY: check-desire-delivery-env
 check-desire-delivery-env: ## Verify DESIRE_DELIVERY_ENABLED=true is used only with e2e-kind or e2e-gcp
-	@if [ "$(strip $(DESIRE_DELIVERY_ENABLED))" = "true" ]; then \
-		case "$(HELMFILE_ENV)" in \
+	@if [ "$$DESIRE_DELIVERY_ENABLED" = "true" ]; then \
+		case "$$HELMFILE_ENV" in \
 			e2e-kind|e2e-gcp) ;; \
-			*) echo "ERROR: DESIRE_DELIVERY_ENABLED=true is supported only with HELMFILE_ENV=e2e-kind or e2e-gcp (got '$(HELMFILE_ENV)')"; exit 1 ;; \
+			*) echo "ERROR: DESIRE_DELIVERY_ENABLED=true is supported only with HELMFILE_ENV=e2e-kind or e2e-gcp (got '$$HELMFILE_ENV')"; exit 1 ;; \
 		esac; \
 	fi
 
