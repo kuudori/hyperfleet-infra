@@ -4,7 +4,7 @@ Terraform configuration for creating personal HyperFleet development clusters.
 
 ## Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────┐
 │                     hcm-hyperfleet project                      │
 │                                                                 │
@@ -223,6 +223,7 @@ Shared clusters (like Prow) have **deletion protection enabled**. To destroy:
 | `gcp_zone` | GCP zone | `us-central1-a` |
 | `gcp_network` | VPC network name | `hyperfleet-dev-vpc` |
 | `gcp_subnetwork` | Subnet name | `hyperfleet-dev-vpc-subnet` |
+| `network_policy_mode` | GKE enforcement (`dataplane_v2`, `calico`, or explicit opt-out `none`) | `dataplane_v2` |
 | `node_count` | Number of nodes | `1` |
 | `machine_type` | VM instance type | `e2-standard-4` |
 | `use_spot_vms` | Use Spot VMs for cost savings | `true` |
@@ -231,6 +232,100 @@ Shared clusters (like Prow) have **deletion protection enabled**. To destroy:
 | `use_pubsub` | Use Google Pub/Sub for messaging (instead of RabbitMQ) | `false` |
 | `enable_dead_letter` | Enable dead letter queue for Pub/Sub | `true` |
 | `pubsub_topic_configs` | Map of Pub/Sub topic configurations with subscriptions and publishers | See below |
+
+## NetworkPolicy Enforcement
+
+NetworkPolicy objects can be accepted by Kubernetes without being enforced. The
+GKE module enables enforcement by default and rejects unknown modes; `null` uses
+the safe default. Disabling enforcement requires explicitly selecting `none` and
+breaks the gateway-to-API trust boundary.
+
+| Mode | Dataplane | NetworkPolicy addon | Use |
+|------|-----------|---------------------|-----|
+| `dataplane_v2` | Cilium (`ADVANCED_DATAPATH`) | Disabled; enforcement is built in | Default for new clusters |
+| `calico` | Existing legacy dataplane, left unchanged | Enabled with provider `CALICO` | Existing Prow cluster |
+| `none` | Left unset | Disabled | Explicit opt-out only; policies are not enforced |
+
+The fleet is mixed Calico and Cilium. Policies must use `networking.k8s.io/v1` and
+avoid provider-specific CRDs such as `CiliumNetworkPolicy` or Calico policy CRDs.
+
+### Existing Clusters
+
+Dataplane V2 is immutable after creation. Do not select `dataplane_v2` for an
+existing legacy cluster: that would replace it. `calico` leaves
+`datapath_provider` unset so enforcement can be enabled in place, but GKE
+recreates the nodes. Do not switch an existing Dataplane V2 cluster to `calico`
+or `none` to try to disable its built-in enforcement.
+
+Personal clusters already using Dataplane V2 should explicitly add
+`network_policy_mode = "dataplane_v2"` to their gitignored tfvars. The mode should
+introduce no changes; review the plan for unrelated drift, including TTL labels.
+Do not edit another developer's personal configuration.
+
+For Prow, `envs/gke/dev-prow.tfvars` selects `calico`. Coordinate a quiet slot
+with the team before enabling it: recreating nodes can interrupt jobs for
+approximately 10–15 minutes. Check the live node count and maintenance window;
+without a window the rollout can start immediately. CI renders its own
+`envs/gke/ci.tfvars.template` through `make ci-tf-env`; it explicitly selects
+`dataplane_v2` and does not inherit Prow's settings.
+
+`network_policy_mode` replaces the former `datapath_provider` and
+`enable_calico_network_policy` inputs. For private tfvars, replace
+`datapath_provider = "ADVANCED_DATAPATH"` with `network_policy_mode = "dataplane_v2"`.
+For a legacy cluster with Calico enabled, replace `datapath_provider = ""` and
+`enable_calico_network_policy = true` with `network_policy_mode = "calico"`.
+Only use `network_policy_mode = "none"` for an intentional legacy-cluster opt-out.
+
+From the repository root, preview the Prow change:
+
+```bash
+HELMFILE_ENV=gcp TF_ENV=dev-prow make plan-terraform
+```
+
+Require `module.gke_cluster[0].google_container_cluster.primary` to show an
+update in place, never a replacement. If it shows replacement, stop and check
+the live dataplane and state; deletion protection is not a substitute for plan
+review. If Calico is already enabled, verify it without reapplying. Review the
+entire plan for unrelated drift (especially autoscaling, node count, and
+maintenance windows) and resolve it separately rather than applying it as part
+of this change. Apply only after approval and maintenance coordination:
+
+```bash
+HELMFILE_ENV=gcp TF_ENV=dev-prow make install-terraform
+gcloud container clusters describe hyperfleet-dev-prow \
+  --project=hcm-hyperfleet --zone=us-central1-a \
+  --format='yaml(networkPolicy,addonsConfig.networkPolicyConfig,datapathProvider)'
+kubectl --context=gke_hcm-hyperfleet_us-central1-a_hyperfleet-dev-prow \
+  -n kube-system get pods -l k8s-app=calico-node
+```
+
+Verify `networkPolicy.enabled: true`, `provider: CALICO`, the addon is not
+disabled, and the Calico node pods are running before testing enforcement.
+
+### Functional Check
+
+The smoke check requires an explicit kubectl context and creates a unique
+scratch namespace. It verifies a client can curl a server's pod IP, a standard
+default-deny ingress policy causes a curl timeout, and deleting the policy
+restores connectivity. API/exec failures do not count as proof of enforcement.
+The scratch namespace is deleted on exit, including failures. Run after the
+node rollout has completed; this is a live integration check, not a dry run.
+
+```bash
+make test-network-policy-enforcement \
+  NETWORK_POLICY_CONTEXT=gke_hcm-hyperfleet_us-central1-a_hyperfleet-dev-prow
+```
+
+`NETWORK_POLICY_SERVER_IMAGE` and `NETWORK_POLICY_CLIENT_IMAGE` may override
+the default nginx and curl images if the cluster requires a mirror.
+
+Offline configuration tests use Terraform mock providers (Terraform >= 1.9),
+cover all three modes, invalid input, and the safe null default, and run as part
+of `make ci-dry-run`:
+
+```bash
+make test-terraform-network-policy
+```
 
 ## Cost Optimization
 
@@ -469,7 +564,7 @@ When constructing your values file, sentinel and adapter2 configs go under the `
 
 ## Directory Structure
 
-```
+```text
 terraform/
 ├── main.tf                 # Root module (developer clusters)
 ├── variables.tf            # Input variables

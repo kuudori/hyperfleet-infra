@@ -43,15 +43,15 @@ node_count   = 1              # Start with 1 node for dev
 machine_type = "e2-standard-4" # 4 vCPU, 16GB RAM
 use_spot_vms = true           # ~70% cost savings, may be preempted
 
+# New clusters use Dataplane V2 with built-in enforcement, unlike legacy Prow
+# which needs Calico to avoid replacing the cluster.
+network_policy_mode = "dataplane_v2"
+
 # Deletion protection (prevents accidental terraform destroy)
 # Personal dev clusters: false (default) - easy cleanup when done
 # Shared long-running clusters: true - prevents accidental deletion (e.g., Prow)
 # To destroy a protected cluster: set to false, apply, then destroy
 enable_deletion_protection = false
-
-# GKE datapath (immutable, changing it recreates the cluster)
-# Default: ADVANCED_DATAPATH (Dataplane V2, needed for NetworkPolicy enforcement)
-# datapath_provider = "ADVANCED_DATAPATH"
 
 # =============================================================================
 # Pub/Sub Configuration (for HyperFleet messaging)

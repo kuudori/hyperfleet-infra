@@ -18,6 +18,18 @@ variable "zone" {
   type        = string
 }
 
+variable "network_policy_mode" {
+  description = "NetworkPolicy enforcement: dataplane_v2 for new clusters, calico for existing legacy clusters, or none to explicitly disable enforcement"
+  type        = string
+  default     = "dataplane_v2"
+  nullable    = false
+
+  validation {
+    condition     = contains(["dataplane_v2", "calico", "none"], var.network_policy_mode)
+    error_message = "network_policy_mode must be one of: dataplane_v2, calico, none. Use none only to explicitly opt out of NetworkPolicy enforcement."
+  }
+}
+
 variable "node_count" {
   description = "Number of nodes in the node pool"
   type        = number
@@ -68,18 +80,6 @@ variable "services_range_name" {
   description = "Name of the secondary range for services"
   type        = string
   default     = "services"
-}
-
-variable "datapath_provider" {
-  description = "GKE datapath provider. Immutable after creation, changing it recreates the cluster. Empty string keeps the GKE default (legacy) datapath"
-  type        = string
-  default     = "ADVANCED_DATAPATH"
-}
-
-variable "enable_calico_network_policy" {
-  description = "Enable Calico NetworkPolicy enforcement. Only for clusters on the legacy datapath (datapath_provider = \"\"), Dataplane V2 enforces NetworkPolicy natively"
-  type        = bool
-  default     = false
 }
 
 variable "maintenance_recurring_window" {

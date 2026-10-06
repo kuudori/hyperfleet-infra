@@ -49,20 +49,14 @@ autoscaling = {
   max_node_count = 3
 }
 
+# Prow uses the legacy dataplane: Calico enables enforcement without replacing
+# the cluster (nodes are recreated when enabling enforcement).
+network_policy_mode = "calico"
+
 # IMPORTANT: Enable deletion protection for this shared long-running cluster
 # This prevents accidental deletion via terraform destroy
 # To destroy, you must first set this to false, apply, then destroy
 enable_deletion_protection = true
-
-# Prow was created before Dataplane V2 and runs the GKE default (legacy)
-# datapath. The field is immutable, so leaving the ADVANCED_DATAPATH default
-# makes Terraform plan a cluster replacement, which destroys the node pool
-# first. Keep this as "" unless the cluster is deliberately being rebuilt.
-datapath_provider = ""
-
-# Legacy datapath has no native NetworkPolicy enforcement, so Prow runs Calico
-# (originally enabled by hand). Without this, Terraform would disable it.
-enable_calico_network_policy = true
 
 # Automatic GKE upgrades drain the node and restart Maestro, so keep them away
 # from the nightlies (09:30, 11:30, 13:30 UTC daily) and weekday presubmits.
