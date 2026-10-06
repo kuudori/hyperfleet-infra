@@ -35,3 +35,23 @@ run "reject_root_legacy_dataplane_v2" {
 
   expect_failures = [var.datapath_provider]
 }
+
+run "reject_root_enforcement_opt_out" {
+  command = plan
+
+  variables {
+    network_policy_mode = "none"
+  }
+
+  expect_failures = [var.network_policy_mode]
+}
+
+run "reject_root_addon_opt_out" {
+  command = plan
+
+  variables {
+    disable_calico_addon = true
+  }
+
+  expect_failures = [var.disable_calico_addon]
+}

@@ -223,8 +223,8 @@ Shared clusters (like Prow) have **deletion protection enabled**. To destroy:
 | `gcp_zone` | GCP zone | `us-central1-a` |
 | `gcp_network` | VPC network name | `hyperfleet-dev-vpc` |
 | `gcp_subnetwork` | Subnet name | `hyperfleet-dev-vpc-subnet` |
-| `network_policy_mode` | GKE enforcement (`dataplane_v2`, `calico`, or explicit opt-out `none`) | `dataplane_v2` |
-| `disable_calico_addon` | Second opt-out stage, only with `none` after node enforcement is disabled and the rollout is complete | `false` |
+| `network_policy_mode` | Required GKE enforcement (`dataplane_v2` or `calico`); `none` is rejected in the HyperFleet deployment | `dataplane_v2` |
+| `disable_calico_addon` | Must remain `false` in the HyperFleet deployment; addon opt-out is available only in the reusable GKE module | `false` |
 | `node_count` | Number of nodes | `1` |
 | `machine_type` | VM instance type | `e2-standard-4` |
 | `use_spot_vms` | Use Spot VMs for cost savings | `true` |
@@ -238,8 +238,15 @@ Shared clusters (like Prow) have **deletion protection enabled**. To destroy:
 
 NetworkPolicy objects can be accepted by Kubernetes without being enforced. The
 GKE module enables enforcement by default and rejects unknown modes; `null` uses
-the safe default. Disabling enforcement requires explicitly selecting `none` and
-breaks the gateway-to-API trust boundary.
+the safe default. The HyperFleet root deployment rejects `none` and addon
+disablement because the API trusts tenant headers supplied by the gateway.
+Without enforcement, a pod can bypass the gateway and its trusted-header
+boundary. Terraform provisions clusters before Helm decides whether to enable
+tenant isolation, so enforcement is required for every cluster from this root.
+
+The reusable `modules/cluster/gke` module supports all three modes below for
+other callers. Its explicit `none` opt-out is not available through the
+HyperFleet root deployment and must not be used for tenant-isolated HyperFleet.
 
 | Mode | Dataplane | NetworkPolicy addon | Use |
 |------|-----------|---------------------|-----|
@@ -277,12 +284,16 @@ they are not silently ignored. For private tfvars, replace
 `datapath_provider = "ADVANCED_DATAPATH"` with `network_policy_mode = "dataplane_v2"`.
 For a legacy cluster with Calico enabled, replace `datapath_provider = ""` and
 `enable_calico_network_policy = true` with `network_policy_mode = "calico"`.
-Only use `network_policy_mode = "none"` for an intentional legacy-cluster opt-out.
+Legacy clusters previously running without enforcement must migrate to `calico`
+before hosting HyperFleet; coordinate the node rollout as described above.
 
 ### Disabling Calico Enforcement
 
-Disabling enforcement breaks the gateway-to-API trust boundary. For an
-intentional legacy-cluster opt-out, GKE requires two separate applies:
+This section applies only to independent callers of the reusable GKE module,
+not the HyperFleet root deployment. Disabling enforcement breaks the
+gateway-to-API trust boundary and is rejected by the HyperFleet root. For an
+intentional legacy-cluster opt-out outside that deployment, GKE requires two
+separate applies:
 
 1. Set `network_policy_mode = "none"` and leave `disable_calico_addon = false`.
    This explicitly disables node enforcement while keeping the addon enabled.
@@ -342,7 +353,8 @@ the default nginx and curl images if the cluster requires a mirror.
 
 Offline configuration tests use Terraform mock providers (Terraform >= 1.7),
 cover all three modes, staged opt-out, migration guards, invalid input, and the
-safe null default, and run as part of `make ci-dry-run`. Plan checks cover known
+safe null default, plus rejection of enforcement/addon opt-out at the HyperFleet
+root, and run as part of `make ci-dry-run`. Plan checks cover known
 configuration values; mocked applies cover API-computed datapath values without
 creating real resources. These tests are compatible with Prow's pinned 1.9.8:
 

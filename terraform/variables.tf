@@ -105,14 +105,14 @@ variable "gcp_zone" {
 }
 
 variable "network_policy_mode" {
-  description = "GKE NetworkPolicy enforcement: dataplane_v2 for new clusters, calico for existing legacy clusters, or none to explicitly disable enforcement"
+  description = "GKE NetworkPolicy enforcement for HyperFleet: dataplane_v2 for new clusters or calico for existing legacy clusters; none is not allowed in this deployment"
   type        = string
   default     = "dataplane_v2"
   nullable    = false
 
   validation {
-    condition     = contains(["dataplane_v2", "calico", "none"], var.network_policy_mode)
-    error_message = "network_policy_mode must be one of: dataplane_v2, calico, none. Use none only to explicitly opt out of NetworkPolicy enforcement."
+    condition     = contains(["dataplane_v2", "calico"], var.network_policy_mode)
+    error_message = "The HyperFleet GCP deployment requires NetworkPolicy enforcement to protect the gateway-to-API trusted-header boundary. network_policy_mode must be dataplane_v2 or calico; none is not allowed."
   }
 }
 
@@ -123,7 +123,7 @@ variable "datapath_provider" {
 
   validation {
     condition     = var.datapath_provider == null
-    error_message = "datapath_provider is no longer supported. Remove it and set network_policy_mode explicitly: dataplane_v2 for ADVANCED_DATAPATH, calico for legacy clusters with enforcement, or none for an intentional legacy opt-out."
+    error_message = "datapath_provider is no longer supported. Remove it and set network_policy_mode explicitly: dataplane_v2 for ADVANCED_DATAPATH or calico for legacy clusters. The HyperFleet deployment requires enforcement."
   }
 }
 
@@ -139,10 +139,15 @@ variable "enable_calico_network_policy" {
 }
 
 variable "disable_calico_addon" {
-  description = "Second-stage Calico opt-out: set true only with mode none after node enforcement has been disabled and the node rollout has completed"
+  description = "Must remain false in the HyperFleet deployment, which requires enforcement; addon opt-out is supported only by the reusable GKE module"
   type        = bool
   default     = false
   nullable    = false
+
+  validation {
+    condition     = !var.disable_calico_addon
+    error_message = "The HyperFleet GCP deployment cannot disable the Calico addon. Enforcement is required to protect the gateway-to-API trusted-header boundary."
+  }
 }
 
 variable "gcp_network" {
