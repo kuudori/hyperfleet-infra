@@ -7,10 +7,12 @@ namespace="network-policy-smoke-$(date +%s)-$$"
 server_image="${NETWORK_POLICY_SERVER_IMAGE:-nginx:1.28-alpine}"
 client_image="${NETWORK_POLICY_CLIENT_IMAGE:-curlimages/curl:8.16.0}"
 
+# Run kubectl against the explicit context, never the caller's current context.
 k() {
     kubectl --context="${context}" "$@"
 }
 
+# Remove only the namespace created by this run and preserve failures on exit.
 cleanup() {
     local status=$?
     if ! k delete namespace "${namespace}" --wait=false; then
@@ -22,6 +24,10 @@ cleanup() {
 }
 
 # Install the cleanup trap only after successfully creating our own namespace.
+if [ "$(k config get-contexts "${context}" -o name)" != "${context}" ]; then
+    echo "ERROR: kubectl context does not exist: ${context}" >&2
+    exit 1
+fi
 k create namespace "${namespace}"
 trap cleanup EXIT
 trap 'exit 130' INT
@@ -35,12 +41,14 @@ if [ -z "${server_ip}" ]; then
     exit 1
 fi
 
+# Probe the server directly, with bounded connection and request timeouts.
 curl_server() {
     # Direct pod IP avoids DNS or Service failures masquerading as enforcement.
     k -n "${namespace}" exec client -- curl --noproxy '*' -fsS \
         --connect-timeout 3 --max-time 5 "http://${server_ip}/" >/dev/null
 }
 
+# Allow startup or policy-removal propagation, but fail if access never returns.
 wait_for_access() {
     for ((attempt = 0; attempt < 30; attempt++)); do
         if curl_server; then

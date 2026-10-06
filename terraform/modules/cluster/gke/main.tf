@@ -18,9 +18,9 @@ resource "google_container_cluster" "primary" {
   datapath_provider = var.network_policy_mode == "dataplane_v2" ? "ADVANCED_DATAPATH" : null
 
   dynamic "network_policy" {
-    for_each = var.network_policy_mode == "calico" ? [1] : []
+    for_each = var.network_policy_mode == "dataplane_v2" ? [] : [1]
     content {
-      enabled  = true
+      enabled  = var.network_policy_mode == "calico"
       provider = "CALICO"
     }
   }
@@ -28,7 +28,8 @@ resource "google_container_cluster" "primary" {
   addons_config {
     network_policy_config {
       # Dataplane V2 enforces policies natively; it must not use the Calico addon.
-      disabled = var.network_policy_mode != "calico"
+      # Keep the addon on while disabling node enforcement in the first stage.
+      disabled = var.network_policy_mode == "dataplane_v2" || var.disable_calico_addon
     }
   }
 
@@ -60,6 +61,13 @@ resource "google_container_cluster" "primary" {
   # When enabled, prevents deletion via GCP Console, API, and Terraform
   # Must be set to false before cluster can be destroyed
   deletion_protection = var.enable_deletion_protection
+
+  lifecycle {
+    precondition {
+      condition     = !var.disable_calico_addon || var.network_policy_mode == "none"
+      error_message = "disable_calico_addon is only valid with network_policy_mode = \"none\", after node enforcement is disabled and the node rollout has completed."
+    }
+  }
 }
 
 resource "google_container_node_pool" "primary" {

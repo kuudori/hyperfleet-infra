@@ -30,7 +30,7 @@ Terraform configuration for creating personal HyperFleet development clusters.
 
 ## Prerequisites
 
-- [Terraform](https://developer.hashicorp.com/terraform/downloads) >= 1.5
+- [Terraform](https://developer.hashicorp.com/terraform/downloads) >= 1.7 (local pin: 1.13.1 in `.tool-versions`; Prow validate pin: 1.9.8 in [openshift/release](https://github.com/openshift/release/blob/main/ci-operator/config/openshift-hyperfleet/hyperfleet-infra/openshift-hyperfleet-hyperfleet-infra-main.yaml))
 - [Google Cloud SDK](https://cloud.google.com/sdk/docs/install) (`gcloud`)
 - [gke-gcloud-auth-plugin](https://cloud.google.com/kubernetes-engine/docs/how-to/cluster-access-for-kubectl#install_plugin) (for kubectl access)
 - `kubectl`
@@ -224,6 +224,7 @@ Shared clusters (like Prow) have **deletion protection enabled**. To destroy:
 | `gcp_network` | VPC network name | `hyperfleet-dev-vpc` |
 | `gcp_subnetwork` | Subnet name | `hyperfleet-dev-vpc-subnet` |
 | `network_policy_mode` | GKE enforcement (`dataplane_v2`, `calico`, or explicit opt-out `none`) | `dataplane_v2` |
+| `disable_calico_addon` | Second opt-out stage, only with `none` after node enforcement is disabled and the rollout is complete | `false` |
 | `node_count` | Number of nodes | `1` |
 | `machine_type` | VM instance type | `e2-standard-4` |
 | `use_spot_vms` | Use Spot VMs for cost savings | `true` |
@@ -244,7 +245,7 @@ breaks the gateway-to-API trust boundary.
 |------|-----------|---------------------|-----|
 | `dataplane_v2` | Cilium (`ADVANCED_DATAPATH`) | Disabled; enforcement is built in | Default for new clusters |
 | `calico` | Existing legacy dataplane, left unchanged | Enabled with provider `CALICO` | Existing Prow cluster |
-| `none` | Left unset | Disabled | Explicit opt-out only; policies are not enforced |
+| `none` | Left unset | Enabled during node opt-out; disabled only in the second stage | Explicit opt-out only; policies are not enforced |
 
 The fleet is mixed Calico and Cilium. Policies must use `networking.k8s.io/v1` and
 avoid provider-specific CRDs such as `CiliumNetworkPolicy` or Calico policy CRDs.
@@ -270,11 +271,31 @@ without a window the rollout can start immediately. CI renders its own
 `dataplane_v2` and does not inherit Prow's settings.
 
 `network_policy_mode` replaces the former `datapath_provider` and
-`enable_calico_network_policy` inputs. For private tfvars, replace
+`enable_calico_network_policy` inputs. Migration guards reject any non-null
+value for either old input before Terraform can plan a cluster replacement;
+they are not silently ignored. For private tfvars, replace
 `datapath_provider = "ADVANCED_DATAPATH"` with `network_policy_mode = "dataplane_v2"`.
 For a legacy cluster with Calico enabled, replace `datapath_provider = ""` and
 `enable_calico_network_policy = true` with `network_policy_mode = "calico"`.
 Only use `network_policy_mode = "none"` for an intentional legacy-cluster opt-out.
+
+### Disabling Calico Enforcement
+
+Disabling enforcement breaks the gateway-to-API trust boundary. For an
+intentional legacy-cluster opt-out, GKE requires two separate applies:
+
+1. Set `network_policy_mode = "none"` and leave `disable_calico_addon = false`.
+   This explicitly disables node enforcement while keeping the addon enabled.
+2. Wait until GKE has completed recreating the nodes and verify node enforcement
+   is disabled. Then set `disable_calico_addon = true` and apply again to disable
+   the addon. Do not set this flag during the first apply. GKE rejects addon
+   removal while node enforcement is still enabled.
+
+The addon flag is rejected for `calico` and `dataplane_v2`. This procedure does
+not apply to Dataplane V2, whose built-in enforcement cannot be disabled.
+See [GKE's disable sequence](https://docs.cloud.google.com/kubernetes-engine/docs/how-to/network-policy#disable_network_policy_enforcement).
+
+### Prow Plan and Verification
 
 From the repository root, preview the Prow change:
 
@@ -319,9 +340,11 @@ make test-network-policy-enforcement \
 `NETWORK_POLICY_SERVER_IMAGE` and `NETWORK_POLICY_CLIENT_IMAGE` may override
 the default nginx and curl images if the cluster requires a mirror.
 
-Offline configuration tests use Terraform mock providers (Terraform >= 1.9),
-cover all three modes, invalid input, and the safe null default, and run as part
-of `make ci-dry-run`:
+Offline configuration tests use Terraform mock providers (Terraform >= 1.7),
+cover all three modes, staged opt-out, migration guards, invalid input, and the
+safe null default, and run as part of `make ci-dry-run`. Plan checks cover known
+configuration values; mocked applies cover API-computed datapath values without
+creating real resources. These tests are compatible with Prow's pinned 1.9.8:
 
 ```bash
 make test-terraform-network-policy

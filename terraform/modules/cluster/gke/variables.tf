@@ -30,6 +30,35 @@ variable "network_policy_mode" {
   }
 }
 
+variable "datapath_provider" {
+  description = "Removed input retained only as a migration guard; remove it and set network_policy_mode explicitly"
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.datapath_provider == null
+    error_message = "datapath_provider is no longer supported. Remove it and set network_policy_mode explicitly: dataplane_v2 for ADVANCED_DATAPATH, calico for legacy clusters with enforcement, or none for an intentional legacy opt-out."
+  }
+}
+
+variable "enable_calico_network_policy" {
+  description = "Removed input retained only as a migration guard; remove it and set network_policy_mode explicitly"
+  type        = bool
+  default     = null
+
+  validation {
+    condition     = var.enable_calico_network_policy == null
+    error_message = "enable_calico_network_policy is no longer supported. Remove it and set network_policy_mode explicitly before planning or applying."
+  }
+}
+
+variable "disable_calico_addon" {
+  description = "Second-stage Calico opt-out: set true only with mode none after node enforcement has been disabled and the node rollout has completed"
+  type        = bool
+  default     = false
+  nullable    = false
+}
+
 variable "node_count" {
   description = "Number of nodes in the node pool"
   type        = number

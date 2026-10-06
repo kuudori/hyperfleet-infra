@@ -53,6 +53,7 @@ MAESTRO_CONSUMER ?= cluster1
 MAESTRO_NAMESPACE ?= maestro
 KUBECONFIG ?= $(HOME)/.kube/config
 NETWORK_POLICY_CONTEXT ?=
+export NETWORK_POLICY_CONTEXT
 
 # Human token helper defaults. TOKEN_TENANT is intentionally empty so callers
 # must choose the active tenant value rather than accidentally minting a token
@@ -799,14 +800,14 @@ validate-terraform: check-terraform ## Validate Terraform syntax and formatting 
 	done
 
 .PHONY: test-terraform-network-policy
-test-terraform-network-policy: check-terraform ## Test GKE policy modes with mock providers (Terraform >= 1.9)
+test-terraform-network-policy: check-terraform ## Test GKE policy modes with mock providers (Terraform >= 1.7)
 	cd $(TF_DIR) && terraform init -backend=false -test-directory=tests/gke
 	cd $(TF_DIR) && terraform test -test-directory=tests/gke
 
 .PHONY: test-network-policy-enforcement
 test-network-policy-enforcement: check-kubectl ## Check default-deny enforcement in a scratch namespace (NETWORK_POLICY_CONTEXT required)
-	@test -n "$(NETWORK_POLICY_CONTEXT)" || { echo "ERROR: NETWORK_POLICY_CONTEXT must explicitly identify the cluster to test"; exit 1; }
-	bash scripts/test-network-policy-enforcement.sh "$(NETWORK_POLICY_CONTEXT)"
+	@test -n "$${NETWORK_POLICY_CONTEXT}" || { echo "ERROR: NETWORK_POLICY_CONTEXT must explicitly identify the cluster to test"; exit 1; }
+	bash scripts/test-network-policy-enforcement.sh "$${NETWORK_POLICY_CONTEXT}"
 
 .PHONY: lint-helm
 lint-helm: check-helm helm-deps ## Lint all Helm charts
