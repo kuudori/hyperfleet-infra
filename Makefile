@@ -52,6 +52,8 @@ RABBITMQ_URL ?=  "amqp://guest:guest@rabbitmq:5672"
 MAESTRO_CONSUMER ?= cluster1
 MAESTRO_NAMESPACE ?= maestro
 KUBECONFIG ?= $(HOME)/.kube/config
+NETWORK_POLICY_CONTEXT ?=
+export NETWORK_POLICY_CONTEXT
 
 # Human token helper defaults. TOKEN_TENANT is intentionally empty so callers
 # must choose the active tenant value rather than accidentally minting a token
@@ -117,7 +119,7 @@ KIND_CONFIG ?= scripts/kind-config.yaml
 # kind's default CNI (kindnet) has no NetworkPolicy enforcement, so it's
 # disabled (see scripts/kind-config.yaml) and install-kind-cilium installs
 # Cilium as the sole CNI, providing both pod networking and policy enforcement.
-# GKE gets equivalent enforcement via Dataplane V2 (see terraform/modules/cluster/gke),
+# GKE gets enforcement via Dataplane V2 or Calico (see terraform/modules/cluster/gke),
 # though its managed Cilium build may differ in version/config from this pinned chart.
 CILIUM_VERSION   ?= 1.20.1
 CILIUM_NAMESPACE ?= kube-system
@@ -797,6 +799,16 @@ validate-terraform: check-terraform ## Validate Terraform syntax and formatting 
 		( cd "$$dir" && terraform init -backend=false && terraform validate ) || exit 1; \
 	done
 
+.PHONY: test-terraform-network-policy
+test-terraform-network-policy: check-terraform ## Test GKE policy modes with mock providers (Terraform >= 1.7)
+	cd $(TF_DIR) && terraform init -backend=false -test-directory=tests/gke
+	cd $(TF_DIR) && terraform test -test-directory=tests/gke
+
+.PHONY: test-network-policy-enforcement
+test-network-policy-enforcement: check-kubectl ## Check default-deny enforcement in a scratch namespace (NETWORK_POLICY_CONTEXT required)
+	@test -n "$${NETWORK_POLICY_CONTEXT}" || { echo "ERROR: NETWORK_POLICY_CONTEXT must explicitly identify the cluster to test"; exit 1; }
+	bash scripts/test-network-policy-enforcement.sh "$${NETWORK_POLICY_CONTEXT}"
+
 .PHONY: lint-helm
 lint-helm: check-helm helm-deps ## Lint all Helm charts
 	@for chart in $(HELM_DIR)/*/; do \
@@ -1025,7 +1037,8 @@ validate-desire-delivery: check-helm ## Validate the desire delivery render (no 
 	done
 
 .PHONY: ci-dry-run
-ci-dry-run: ci-validate ## Ci dry-run: ci-validate + validate maestro + validate network policies + validate namespace cleaner + validate mock OIDC + validate desire delivery
+ci-dry-run: ci-validate ## Ci dry-run: ci-validate + test GKE policy modes + validate chart rendering
+	$(MAKE) test-terraform-network-policy
 	$(MAKE) validate-maestro
 	$(MAKE) validate-mock-oidc
 	$(MAKE) validate-network-policies

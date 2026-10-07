@@ -58,18 +58,6 @@ variable "use_spot_vms" {
   default     = true
 }
 
-variable "datapath_provider" {
-  description = "GKE datapath provider (ADVANCED_DATAPATH = Dataplane V2). Immutable after creation, changing it recreates the cluster. Empty string keeps the GKE default (legacy) datapath, used by clusters created before Dataplane V2 like Prow"
-  type        = string
-  default     = "ADVANCED_DATAPATH"
-}
-
-variable "enable_calico_network_policy" {
-  description = "Enable Calico NetworkPolicy enforcement. Only for clusters on the legacy datapath (datapath_provider = \"\") like Prow, Dataplane V2 enforces NetworkPolicy natively"
-  type        = bool
-  default     = false
-}
-
 variable "maintenance_recurring_window" {
   description = "Recurring GKE maintenance window (RFC3339 UTC start/end of the first occurrence plus an RFC5545 RRULE). Null leaves GKE free to upgrade at any time, set it for shared clusters like Prow"
   type = object({
@@ -114,6 +102,52 @@ variable "gcp_zone" {
   description = "GCP zone"
   type        = string
   default     = "us-central1-a"
+}
+
+variable "network_policy_mode" {
+  description = "GKE NetworkPolicy enforcement for HyperFleet: dataplane_v2 for new clusters or calico for existing legacy clusters; none is not allowed in this deployment"
+  type        = string
+  default     = "dataplane_v2"
+  nullable    = false
+
+  validation {
+    condition     = contains(["dataplane_v2", "calico"], var.network_policy_mode)
+    error_message = "The HyperFleet GCP deployment requires NetworkPolicy enforcement to protect the gateway-to-API trusted-header boundary. network_policy_mode must be dataplane_v2 or calico; none is not allowed."
+  }
+}
+
+variable "datapath_provider" {
+  description = "Removed input retained only as a migration guard; remove it and set network_policy_mode explicitly"
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.datapath_provider == null
+    error_message = "datapath_provider is no longer supported. Remove it and set network_policy_mode explicitly: dataplane_v2 for ADVANCED_DATAPATH or calico for legacy clusters. The HyperFleet deployment requires enforcement."
+  }
+}
+
+variable "enable_calico_network_policy" {
+  description = "Removed input retained only as a migration guard; remove it and set network_policy_mode explicitly"
+  type        = bool
+  default     = null
+
+  validation {
+    condition     = var.enable_calico_network_policy == null
+    error_message = "enable_calico_network_policy is no longer supported. Remove it and set network_policy_mode explicitly before planning or applying."
+  }
+}
+
+variable "disable_calico_addon" {
+  description = "Must remain false in the HyperFleet deployment, which requires enforcement; addon opt-out is supported only by the reusable GKE module"
+  type        = bool
+  default     = false
+  nullable    = false
+
+  validation {
+    condition     = !var.disable_calico_addon
+    error_message = "The HyperFleet GCP deployment cannot disable the Calico addon. Enforcement is required to protect the gateway-to-API trusted-header boundary."
+  }
 }
 
 variable "gcp_network" {

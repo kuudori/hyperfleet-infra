@@ -32,10 +32,10 @@ module "gke_cluster" {
   labels       = local.common_labels
   autoscaling  = var.autoscaling
 
-  # Dataplane V2 by default, shared clusters created before it override this
-  datapath_provider            = var.datapath_provider
-  enable_calico_network_policy = var.enable_calico_network_policy
   maintenance_recurring_window = var.maintenance_recurring_window
+
+  network_policy_mode  = var.network_policy_mode
+  disable_calico_addon = var.disable_calico_addon
 
   # Deletion protection for shared/production clusters
   enable_deletion_protection = var.enable_deletion_protection

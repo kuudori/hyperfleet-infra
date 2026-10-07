@@ -13,30 +13,23 @@ resource "google_container_cluster" "primary" {
     services_secondary_range_name = var.services_range_name
   }
 
-  # GKE Dataplane V2 (Cilium-based) — required for NetworkPolicy enforcement.
-  # Without this, helm/network-policies' NetworkPolicy objects are inert.
-  # NOTE: immutable after cluster creation — changing this on an existing
-  # cluster requires recreating it, not an in-place update.
-  # Shared clusters created before Dataplane V2 (e.g., Prow) override this
-  # with "" so Terraform keeps their existing datapath.
-  datapath_provider = var.datapath_provider == "" ? null : var.datapath_provider
+  # Dataplane V2 is immutable. Leave this unset for legacy clusters so enabling
+  # Calico updates them in place instead of forcing a cluster replacement.
+  datapath_provider = var.network_policy_mode == "dataplane_v2" ? "ADVANCED_DATAPATH" : null
 
-  # Calico NetworkPolicy enforcement, only for legacy-datapath clusters.
-  # Dataplane V2 enforces NetworkPolicy natively and must not enable this.
   dynamic "network_policy" {
-    for_each = var.enable_calico_network_policy ? [1] : []
+    for_each = var.network_policy_mode == "dataplane_v2" ? [] : [1]
     content {
-      enabled  = true
+      enabled  = var.network_policy_mode == "calico"
       provider = "CALICO"
     }
   }
 
-  dynamic "addons_config" {
-    for_each = var.enable_calico_network_policy ? [1] : []
-    content {
-      network_policy_config {
-        disabled = false
-      }
+  addons_config {
+    network_policy_config {
+      # Dataplane V2 enforces policies natively; it must not use the Calico addon.
+      # Keep the addon on while disabling node enforcement in the first stage.
+      disabled = var.network_policy_mode == "dataplane_v2" || var.disable_calico_addon
     }
   }
 
@@ -71,8 +64,8 @@ resource "google_container_cluster" "primary" {
 
   lifecycle {
     precondition {
-      condition     = !var.enable_calico_network_policy || var.datapath_provider == ""
-      error_message = "enable_calico_network_policy requires datapath_provider = \"\" (legacy datapath). Dataplane V2 enforces NetworkPolicy natively and GKE rejects Calico on it."
+      condition     = !var.disable_calico_addon || var.network_policy_mode == "none"
+      error_message = "disable_calico_addon is only valid with network_policy_mode = \"none\", after node enforcement is disabled and the node rollout has completed."
     }
   }
 }

@@ -10,8 +10,8 @@ output "endpoint" {
 }
 
 output "ca_certificate" {
-  description = "Cluster CA certificate (base64 encoded)"
-  value       = google_container_cluster.primary.master_auth[0].cluster_ca_certificate
+  description = "Cluster CA certificate (base64 encoded), or null when master_auth is unavailable"
+  value       = one(google_container_cluster.primary.master_auth[*].cluster_ca_certificate)
   sensitive   = true
 }
 

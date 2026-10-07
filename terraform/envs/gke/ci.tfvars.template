@@ -45,8 +45,7 @@ enable_deletion_protection = false
 # CI tests the same datapath as developer clusters (Dataplane V2, native
 # NetworkPolicy). Pinned rather than left to the module default so a change
 # to that default shows up as a diff here.
-datapath_provider            = "ADVANCED_DATAPATH"
-enable_calico_network_policy = false
+network_policy_mode = "dataplane_v2"
 
 # =============================================================================
 # Pub/Sub Configuration
