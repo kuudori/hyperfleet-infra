@@ -381,10 +381,6 @@ else
 	@echo "[NOTE: Skipping Authorino operator install (AUTH_MODE=$(AUTH_MODE))]"
 endif
 
-.PHONY: ensure-wristband-signing-key
-ensure-wristband-signing-key: check-kubectl check-hyperfleet-namespace ## Create the Authorino wristband signing Secret once for AUTH_MODE=EDGE+API
-	@./scripts/ensure-wristband-signing-key.sh
-
 .PHONY: ensure-kubernetes-oidc-discovery
 ensure-kubernetes-oidc-discovery: check-kubectl check-kubectl-context ## Allow API-mode JWKS discovery on Kind before deployment
 	@./scripts/ensure-kubernetes-oidc-discovery.sh
@@ -430,11 +426,11 @@ install-repos: check-helmfile-env ## Add all hyperfleet helm repos
 	$(call add-helm-repo,adapter,$(ADAPTER_CHART_REF))
 
 .PHONY: install-hyperfleet
-install-hyperfleet: validate-helmfile-config check-hyperfleet-namespace maybe-install-authorino-operator install-cert-manager ensure-kubernetes-oidc-discovery ensure-wristband-signing-key ## Install all HyperFleet components with mandatory request-path TLS
+install-hyperfleet: validate-helmfile-config check-hyperfleet-namespace maybe-install-authorino-operator install-cert-manager ensure-kubernetes-oidc-discovery ## Install all HyperFleet components with mandatory request-path TLS
 	helmfile -f helmfile/helmfile.yaml.gotmpl -e $(HELMFILE_ENV) apply
 
 .PHONY: switch-tenant-model
-switch-tenant-model: validate-helmfile-config maybe-install-authorino-operator ensure-wristband-signing-key ## Switch the active tenant model; requires AUTH_MODE=EDGE or EDGE+API
+switch-tenant-model: validate-helmfile-config maybe-install-authorino-operator ## Switch the active tenant model; requires AUTH_MODE=EDGE or EDGE+API
 	@if [ -z "$(EDGE_AUTH_ENABLED)" ]; then \
 		echo "ERROR: switch-tenant-model requires AUTH_MODE=EDGE or EDGE+API"; exit 1; \
 	fi
@@ -448,7 +444,7 @@ switch-tenant-model: validate-helmfile-config maybe-install-authorino-operator e
 	@echo "OK: tenant model switched to '$(TENANT_MODEL)' (same AuthConfig name replaces the policy; old-model tokens are rejected at the gateway)"
 
 .PHONY: install-api
-install-api: validate-helmfile-config check-hyperfleet-namespace install-cert-manager maybe-install-authorino-operator ensure-kubernetes-oidc-discovery ensure-wristband-signing-key ## Install gateway PKI prerequisite and HyperFleet API
+install-api: validate-helmfile-config check-hyperfleet-namespace install-cert-manager maybe-install-authorino-operator ensure-kubernetes-oidc-discovery ## Install gateway PKI prerequisite and HyperFleet API
 	helmfile apply -f helmfile/helmfile.yaml.gotmpl -e $(HELMFILE_ENV) -l component=gateway
 	helmfile apply -f helmfile/helmfile.yaml.gotmpl -e $(HELMFILE_ENV) -l component=api
 

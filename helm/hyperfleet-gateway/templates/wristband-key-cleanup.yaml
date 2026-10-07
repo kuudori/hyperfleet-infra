@@ -1,0 +1,111 @@
+{{- $name := include "hyperfleet-gateway.wristbandCleanupName" . }}
+{{- $secretName := .Values.auth.wristband.signingKeySecretName }}
+{{- $hookEvents := "pre-delete" }}
+{{- if ne .Values.auth.mode "EDGE+API" }}
+{{- $hookEvents = "post-install,post-upgrade,pre-delete" }}
+{{- end }}
+# The post-install/upgrade events remove a key only after an EDGE+API AuthConfig
+# has been replaced or removed. pre-delete covers uninstall of a release whose
+# last mode was EDGE+API. This Job deliberately does not wait for Authorino.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "hyperfleet-gateway.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": {{ $hookEvents | quote }}
+    "helm.sh/hook-weight": "-3"
+    "helm.sh/hook-delete-policy": "before-hook-creation,hook-succeeded"
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "hyperfleet-gateway.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": {{ $hookEvents | quote }}
+    "helm.sh/hook-weight": "-2"
+    "helm.sh/hook-delete-policy": "before-hook-creation,hook-succeeded"
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: [{{ $secretName | quote }}]
+    verbs: ["delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "hyperfleet-gateway.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": {{ $hookEvents | quote }}
+    "helm.sh/hook-weight": "-1"
+    "helm.sh/hook-delete-policy": "before-hook-creation,hook-succeeded"
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "hyperfleet-gateway.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": {{ $hookEvents | quote }}
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": "before-hook-creation,hook-succeeded"
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 60
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        {{- include "hyperfleet-gateway.labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ $name }}
+      automountServiceAccountToken: true
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: cleanup-signing-key
+          image: {{ .Values.auth.wristband.lifecycle.image | quote }}
+          imagePullPolicy: {{ .Values.auth.wristband.lifecycle.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: HOME
+              value: /work
+          command:
+            - /bin/bash
+            - -ec
+            - |
+              secret_name={{ $secretName | quote }}
+              kubectl delete secret "${secret_name}" --ignore-not-found=true
+          resources:
+            {{- toYaml .Values.auth.wristband.lifecycle.resources | nindent 12 }}
+          volumeMounts:
+            - name: work
+              mountPath: /work
+      volumes:
+        - name: work
+          emptyDir: {}

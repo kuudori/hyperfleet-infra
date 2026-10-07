@@ -92,7 +92,16 @@
           "properties": {
             "signingKeySecretName": { "type": "string", "minLength": 1 },
             "audience": { "type": "string", "minLength": 1 },
-            "tokenDuration": { "type": "integer", "minimum": 1 }
+            "tokenDuration": { "type": "integer", "minimum": 1 },
+            "lifecycle": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "image": { "type": "string", "minLength": 1 },
+                "pullPolicy": { "type": "string", "minLength": 1 },
+                "resources": { "type": "object" }
+              }
+            }
           }
         },
         "machineIdentity": {
@@ -126,7 +135,7 @@
           "if": { "properties": { "mode": { "const": "EDGE+API" } }, "required": ["mode"] },
           "then": {
             "required": ["wristband"],
-            "properties": { "wristband": { "required": ["signingKeySecretName", "audience", "tokenDuration"] } }
+            "properties": { "wristband": { "required": ["signingKeySecretName", "audience", "tokenDuration", "lifecycle"] } }
           }
         }
       ]

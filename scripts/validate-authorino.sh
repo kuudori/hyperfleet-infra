@@ -13,26 +13,6 @@ require_command() {
 }
 
 require_command helm
-require_command openssl
-
-# Authorino v0.26.2 expects the legacy RSA PEM encoding for wristband keys.
-# OpenSSL 3 defaults to PKCS#8, so exercise the exact command used by Makefile.
-validate_wristband_signing_key_format() {
-    local key_file
-    key_file=$(mktemp)
-
-    if ! openssl genrsa -traditional -out "$key_file" 3072 >/dev/null 2>&1; then
-        echo 'ERROR: unable to generate a traditional PKCS#1 RSA wristband signing key' >&2
-        rm -f "$key_file"
-        exit 1
-    fi
-    if [[ $(head -n 1 "$key_file") != '-----BEGIN RSA PRIVATE KEY-----' ]]; then
-        echo 'ERROR: pinned Authorino wristband configuration requires a PKCS#1 RSA private key' >&2
-        rm -f "$key_file"
-        exit 1
-    fi
-    rm -f "$key_file"
-}
 
 render_gateway() {
     helm template gw "$GATEWAY_CHART" --namespace default \
@@ -105,7 +85,6 @@ assert_machine_allow_list() {
 }
 
 echo "Validating HyperFleet gateway security templates..."
-validate_wristband_signing_key_format
 
 for mode in NONE EDGE API EDGE+API; do
     if ! out=$(render_gateway "$mode"); then
@@ -171,6 +150,22 @@ for mode in NONE EDGE API EDGE+API; do
     if [[ "$mode" == EDGE+API ]]; then
         assert_contains "$out" 'algorithm: RS256' 'RS256 wristband missing'
         assert_contains "$out" 'dynamicMetadata' 'wristband dynamic metadata missing'
+        assert_contains "$out" 'name: gw-hyperfleet-gateway-wristband-key-provisioner' \
+            'EDGE+API: signing-key provisioner hook missing'
+        assert_contains "$out" '"helm.sh/hook": "pre-install,pre-upgrade"' \
+            'EDGE+API: signing-key provisioner must run before AuthConfig creation'
+        assert_contains "$out" 'bitnami/kubectl:1.33.4-debian-12-r0@sha256:ed0b31a0508da84ee655c5c6e01bd3897fc56ad6cf69debb27fa1893a06d2246' \
+            'EDGE+API: immutable Bitnami Debian 12 kubectl image missing'
+        assert_contains "$out" "openssl genrsa -traditional -out \"\${key_file}\" 3072" \
+            'EDGE+API: provisioner does not generate a 3072-bit PKCS#1 RSA key'
+        assert_contains "$out" 'does not contain a 3072-bit RSA private key' \
+            'EDGE+API: provisioner does not validate an existing key size'
+        assert_contains "$out" 'resourceNames:' \
+            'EDGE+API: signing-key Role lacks named-Secret restrictions'
+        assert_contains "$out" 'name: gw-hyperfleet-gateway-wristband-key-cleanup' \
+            'EDGE+API: uninstall signing-key cleanup hook missing'
+        assert_not_contains "$out" '"helm.sh/hook": "post-install,post-upgrade,pre-delete"' \
+            'EDGE+API: cleanup must not delete a still-required signing key during upgrade'
         assert_filter_order "$out" \
             'wristband Lua filter must be between ext_authz and router' \
             'name: envoy.filters.http.ext_authz' \
@@ -179,6 +174,10 @@ for mode in NONE EDGE API EDGE+API; do
     else
         assert_not_contains "$out" 'name: envoy.filters.http.lua' \
             "($mode): wristband Lua unexpectedly rendered"
+        assert_not_contains "$out" 'wristband-key-provisioner' \
+            "($mode): wristband provisioner unexpectedly rendered"
+        assert_contains "$out" "kubectl delete secret \"\${secret_name}\" --ignore-not-found=true" \
+            "($mode): stale wristband signing-key cleanup missing"
     fi
 done
 

@@ -1,0 +1,174 @@
+{{- if eq .Values.auth.mode "EDGE+API" }}
+{{- $name := include "hyperfleet-gateway.wristbandProvisionerName" . }}
+{{- $secretName := .Values.auth.wristband.signingKeySecretName }}
+# This pre-install/upgrade hook completes before Helm installs or updates the
+# AuthConfig, so Authorino never receives the wristband configuration without
+# its signing key. All hook objects are deleted after a successful run.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "hyperfleet-gateway.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": "pre-install,pre-upgrade"
+    "helm.sh/hook-weight": "-3"
+    "helm.sh/hook-delete-policy": "before-hook-creation,hook-succeeded"
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "hyperfleet-gateway.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": "pre-install,pre-upgrade"
+    "helm.sh/hook-weight": "-2"
+    "helm.sh/hook-delete-policy": "before-hook-creation,hook-succeeded"
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: [{{ $secretName | quote }}]
+    verbs: ["get"]
+  # Kubernetes RBAC cannot restrict create by resourceName because the object
+  # does not exist yet. This is the only unrestricted verb granted to the Job.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "hyperfleet-gateway.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": "pre-install,pre-upgrade"
+    "helm.sh/hook-weight": "-1"
+    "helm.sh/hook-delete-policy": "before-hook-creation,hook-succeeded"
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "hyperfleet-gateway.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": "pre-install,pre-upgrade"
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": "before-hook-creation,hook-succeeded"
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 120
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        {{- include "hyperfleet-gateway.labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ $name }}
+      automountServiceAccountToken: true
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: provision-signing-key
+          image: {{ .Values.auth.wristband.lifecycle.image | quote }}
+          imagePullPolicy: {{ .Values.auth.wristband.lifecycle.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: HOME
+              value: /work
+          command:
+            - /bin/bash
+            - -ec
+            - |
+              secret_name={{ $secretName | quote }}
+              work_dir=/work
+              umask 077
+              key_file=$(mktemp "${work_dir}/wristband-key.XXXXXX")
+              encoded_file=$(mktemp "${work_dir}/wristband-key-encoded.XXXXXX")
+              trap 'rm -f "${key_file}" "${encoded_file}"' EXIT HUP INT TERM
+
+              validate_existing_secret() {
+                secret_type=$(kubectl get secret "${secret_name}" -o jsonpath='{.type}')
+                if [[ "${secret_type}" != "Opaque" ]]; then
+                  echo "ERROR: existing Secret ${secret_name} is not Opaque; it was not modified" >&2
+                  return 1
+                fi
+                kubectl get secret "${secret_name}" -o jsonpath='{.data.key\.pem}' > "${encoded_file}"
+                if [[ ! -s "${encoded_file}" ]]; then
+                  echo "ERROR: existing Secret ${secret_name} does not contain key.pem; it was not modified" >&2
+                  return 1
+                fi
+                if ! base64 --decode "${encoded_file}" > "${key_file}" 2>/dev/null; then
+                  echo "ERROR: existing Secret ${secret_name} has invalid key.pem data; it was not modified" >&2
+                  return 1
+                fi
+                if [[ $(head -n 1 "${key_file}") != "-----BEGIN RSA PRIVATE KEY-----" ]] \
+                    || ! openssl rsa -in "${key_file}" -check -noout >/dev/null 2>&1; then
+                  echo "ERROR: existing Secret ${secret_name} does not contain a valid PKCS#1 RSA private key; it was not modified" >&2
+                  return 1
+                fi
+                key_bits=$(openssl rsa -in "${key_file}" -noout -text 2>/dev/null \
+                  | sed -n 's/^Private-Key: (\([0-9][0-9]*\) bit.*/\1/p')
+                if [[ "${key_bits}" != "3072" ]]; then
+                  echo "ERROR: existing Secret ${secret_name} does not contain a 3072-bit RSA private key; it was not modified" >&2
+                  return 1
+                fi
+              }
+
+              if kubectl get secret "${secret_name}" >/dev/null 2>&1; then
+                validate_existing_secret
+                echo "OK: preserving valid wristband signing Secret ${secret_name}"
+                exit 0
+              fi
+
+              openssl genrsa -traditional -out "${key_file}" 3072 >/dev/null 2>&1
+              if [[ $(head -n 1 "${key_file}") != "-----BEGIN RSA PRIVATE KEY-----" ]]; then
+                echo "ERROR: generated wristband key is not a PKCS#1 RSA private key" >&2
+                exit 1
+              fi
+
+              if kubectl create secret generic "${secret_name}" --from-file=key.pem="${key_file}"; then
+                validate_existing_secret
+                echo "OK: created wristband signing Secret ${secret_name}"
+                exit 0
+              fi
+
+              # A concurrent Helm release may have won the create race. Only
+              # accept that winner after validating it without modifying it.
+              if kubectl get secret "${secret_name}" >/dev/null 2>&1; then
+                validate_existing_secret
+                echo "OK: preserving concurrently created wristband signing Secret ${secret_name}"
+                exit 0
+              fi
+              echo "ERROR: failed to create wristband signing Secret ${secret_name}" >&2
+              exit 1
+          resources:
+            {{- toYaml .Values.auth.wristband.lifecycle.resources | nindent 12 }}
+          volumeMounts:
+            - name: work
+              mountPath: /work
+      volumes:
+        - name: work
+          emptyDir: {}
+{{- end }}

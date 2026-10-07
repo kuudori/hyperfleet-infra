@@ -180,7 +180,8 @@ releases:
   - name: hyperfleet-api
     namespace: {{ .Values.namespace }}
     chart: hyperfleet-api/hyperfleet-api
-    # The gateway owns the internal PKI and (in EDGE+API) wristband discovery.
+    # The gateway owns the internal PKI and (in EDGE+API) Authorino wristband
+    # discovery plus the in-cluster signing-key lifecycle hook.
     # It must exist before the API mounts its serving certificate and CA bundle.
     needs:
       - hyperfleet-gateway
