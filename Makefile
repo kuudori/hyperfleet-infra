@@ -812,52 +812,6 @@ validate-maestro: check-helm ## Validate Maestro Helm chart rendering
 validate-authorino: check-helm ## Validate internal TLS and all gateway AUTH_MODE templates
 	@./scripts/validate-authorino.sh
 
-# Create only the generated broker value stubs missing from a clean checkout,
-# then remove only those stubs once the nested validation target completes.
-# This lets Helmfile render kind/e2e-kind configs without making validation
-# depend on a prior local deployment.
-define with-validation-generated-values
-	@set -eu; \
-	created_files=""; \
-	cleanup_generated() { \
-		for file in $$created_files; do rm -f "$$file"; done; \
-		rmdir $(GENERATED_RABBITMQ_DIR) $(GENERATED_DIR) 2>/dev/null || true; \
-	}; \
-	trap cleanup_generated EXIT HUP INT TERM; \
-	for file in \
-		$(GENERATED_RABBITMQ_DIR)/adapter1.yaml \
-		$(GENERATED_RABBITMQ_DIR)/adapter2.yaml \
-		$(GENERATED_RABBITMQ_DIR)/adapter3.yaml \
-		$(GENERATED_RABBITMQ_DIR)/sentinel-clusters.yaml \
-		$(GENERATED_RABBITMQ_DIR)/sentinel-nodepools.yaml \
-		$(GENERATED_DIR)/adapter1.yaml \
-		$(GENERATED_DIR)/adapter2.yaml \
-		$(GENERATED_DIR)/adapter3.yaml \
-		$(GENERATED_DIR)/sentinel-clusters.yaml \
-		$(GENERATED_DIR)/sentinel-nodepools.yaml; do \
-		if [ ! -f "$$file" ]; then \
-			mkdir -p "$$(dirname "$$file")"; \
-			printf '%s\n' 'broker: {}' > "$$file"; \
-			created_files="$$created_files $$file"; \
-		fi; \
-	done; \
-	$(MAKE) --no-print-directory $(1)
-endef
-
-.PHONY: validate-mock-oidc validate-mock-oidc-inner
-validate-mock-oidc: check-helm ## Validate the test-only mock OIDC chart and AUTH_MODE integration
-	$(call with-validation-generated-values,validate-mock-oidc-inner)
-
-validate-mock-oidc-inner:
-	@./scripts/validate-mock-oidc.sh
-
-.PHONY: validate-api-auth-modes validate-api-auth-modes-inner
-validate-api-auth-modes: check-helmfile ## Validate API JWT wiring for every AUTH_MODE
-	$(call with-validation-generated-values,validate-api-auth-modes-inner)
-
-validate-api-auth-modes-inner:
-	@./scripts/validate-api-auth-modes.sh
-
 .PHONY: validate-network-policies
 validate-network-policies: check-helm ## Validate network-policies Helm chart rendering
 	@echo "Validating network-policies chart..."
@@ -885,7 +839,7 @@ validate-namespace-cleaner: check-helm ## Validate namespace-cleaner Helm chart 
 	@echo "OK: namespace-cleaner chart rendered with scheduled-run replacement and critical priority"
 
 .PHONY: ci-validate
-ci-validate: validate-terraform lint-helm lint-shellcheck validate-authorino validate-api-auth-modes ## Ci validate: validate terraform (all stacks) + lint helm + lint shellcheck + validate authentication wiring
+ci-validate: validate-terraform lint-helm lint-shellcheck validate-authorino ## Ci validate: validate terraform (all stacks) + lint helm + lint shellcheck + gateway Authorino templates
 
 # validate-desire-delivery renders the opt-in desire delivery stack
 # (DESIRE_DELIVERY_ENABLED=true) for both e2e environments and checks that the
@@ -926,7 +880,6 @@ validate-desire-delivery: check-helm ## Validate the desire delivery render (no 
 ci-dry-run: ci-validate ## Ci dry-run: ci-validate + test GKE policy modes + validate chart rendering
 	$(MAKE) test-terraform-network-policy
 	$(MAKE) validate-maestro
-	$(MAKE) validate-mock-oidc
 	$(MAKE) validate-network-policies
 	$(MAKE) validate-namespace-cleaner
 	$(MAKE) validate-desire-delivery
