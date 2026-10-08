@@ -81,11 +81,11 @@ MACHINE_TOKEN_DURATION ?= 10m
 # is EDGE or EDGE+API. Pinned by commit (not the mutable version tag) and
 # checksum-verified before being applied. Bumping AUTHORINO_OPERATOR_VERSION
 # requires updating COMMIT and SHA256 together.
-AUTHORINO_OPERATOR_VERSION        ?= v0.26.0
-AUTHORINO_OPERATOR_COMMIT         ?= 852f24e703c4a21ade6400e8fec7248e2dd562f6
+AUTHORINO_OPERATOR_VERSION        ?= v0.27.0
+AUTHORINO_OPERATOR_COMMIT         ?= 9965ff8cafce14f98b99ebc3756bc4c37841fa4a
 AUTHORINO_OPERATOR_NAMESPACE      ?= authorino-operator
 AUTHORINO_OPERATOR_MANIFEST       ?= https://raw.githubusercontent.com/Kuadrant/authorino-operator/$(AUTHORINO_OPERATOR_COMMIT)/config/deploy/manifests.yaml
-AUTHORINO_OPERATOR_MANIFEST_SHA256 ?= ce2bef459d1456cbe462754cad571f87150fc1ad8bee4f1d010eb0db5b0aabdd
+AUTHORINO_OPERATOR_MANIFEST_SHA256 ?= baa4b6d8cac1a84ec48c3c9ec7661eb250c667e9eff63b8abcb6945a4663ec99
 
 CERT_MANAGER_VERSION         ?= v1.21.2
 CERT_MANAGER_NAMESPACE       ?= cert-manager

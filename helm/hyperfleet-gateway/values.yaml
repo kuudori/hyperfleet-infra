@@ -146,8 +146,9 @@ auth:
 
   # Rendered in EDGE and EDGE+API.
   authorino:
-    # Pin published image; align with AUTHORINO_OPERATOR_VERSION in Makefile.
-    image: quay.io/kuadrant/authorino:v0.26.2
+    # Pin the runtime; the Makefile pins the operator CRD that supports its
+    # AuthConfig schema.
+    image: quay.io/kuadrant/authorino:v0.28.0
     # Empty: gateway Service DNS + localhost (see authconfig.yaml).
     hosts: []
     # Test-only CA mounted into Authorino's Go system trust directory when

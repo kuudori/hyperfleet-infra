@@ -62,7 +62,12 @@ spec:
       when:
         - predicate: request.headers['authorization'].startsWith('Bearer ')
       jwt:
+        # issuerUrl discovers the provider's OIDC configuration/JWKS. issuer
+        # and audiences enforce the JWT claims during authentication.
         issuerUrl: {{ .issuerUrl | quote }}
+        issuer: {{ .issuerUrl | quote }}
+        audiences:
+          - {{ .audience | quote }}
       credentials:
         authorizationHeader:
           prefix: Bearer
@@ -86,14 +91,6 @@ spec:
             operator: neq
             value: ""
     {{- range .Values.auth.identityProviders }}
-    {{ printf "%s-audience" .name | quote }}:
-      when:
-        - selector: auth.identity.iss
-          operator: eq
-          value: {{ .issuerUrl | quote }}
-      patternMatching:
-        patterns:
-          - predicate: {{ printf "has(auth.identity.aud) && (type(auth.identity.aud) == string ? auth.identity.aud == %s : %s in auth.identity.aud)" (.audience | toJson) (.audience | toJson) | quote }}
     {{- if .identityClaimPattern }}
     {{ printf "%s-identity" .name | quote }}:
       when:

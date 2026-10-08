@@ -19,7 +19,10 @@ render_gateway() {
         --set-string "auth.mode=$1" \
         --set-string 'auth.identityProviders[0].name=human' \
         --set-string 'auth.identityProviders[0].issuerUrl=https://issuer.invalid/oidc' \
-        --set-string 'auth.identityProviders[0].audience=hyperfleet-api' 2>&1
+        --set-string 'auth.identityProviders[0].audience=hyperfleet-api' \
+        --set-string 'auth.identityProviders[1].name=partner' \
+        --set-string 'auth.identityProviders[1].issuerUrl=https://partner-issuer.invalid/oidc' \
+        --set-string 'auth.identityProviders[1].audience=hyperfleet-partner-api' 2>&1
 }
 
 assert_contains() {
@@ -36,6 +39,28 @@ assert_not_contains() {
         echo "ERROR: $message" >&2
         exit 1
     }
+}
+
+assert_jwt_claim_enforcement() {
+    local output=$1 provider=$2 issuer=$3 audience=$4 provider_block
+    provider_block=$(awk -v provider="$provider" '
+        $0 == "    \"" provider "\":" { capture = 1; next }
+        capture && /^    "/ { exit }
+        capture { print }
+    ' <<<"$output")
+
+    [[ -n "$provider_block" ]] || {
+        echo "ERROR: JWT provider $provider was not rendered" >&2
+        exit 1
+    }
+    assert_contains "$provider_block" "issuerUrl: \"$issuer\"" \
+        "JWT provider $provider has the wrong discovery issuerUrl"
+    assert_contains "$provider_block" "issuer: \"$issuer\"" \
+        "JWT provider $provider does not enforce its issuer during authentication"
+    assert_contains "$provider_block" 'audiences:' \
+        "JWT provider $provider does not enforce an audience during authentication"
+    assert_contains "$provider_block" "- \"$audience\"" \
+        "JWT provider $provider has the wrong enforced audience"
 }
 
 assert_filter_order() {
@@ -119,7 +144,7 @@ for mode in NONE EDGE API EDGE+API; do
     case "$mode" in
         EDGE|EDGE+API)
             assert_contains "$out" '^kind: Authorino$' "($mode): Authorino missing"
-            assert_contains "$out" 'image: "quay.io/kuadrant/authorino:v0.26.2"' \
+            assert_contains "$out" 'image: "quay.io/kuadrant/authorino:v0.28.0"' \
                 "($mode): expected pinned Authorino image is missing"
             assert_contains "$out" 'failure_mode_allow: false' \
                 "($mode): ext_authz is not fail-closed"
@@ -130,10 +155,10 @@ for mode in NONE EDGE API EDGE+API; do
             assert_contains "$out" 'kubectl wait --for=condition=Ready certificate/authorino-authorino-oidc' \
                 "($mode): Authorino OIDC certificate readiness wait missing"
             assert_machine_allow_list "$out" "$mode"
-            assert_contains "$out" 'type(auth.identity.aud) == string' \
-                "($mode): human JWT audience rule does not support string claims"
-            assert_contains "$out" ' in auth.identity.aud' \
-                "($mode): human JWT audience rule does not support array claims"
+            assert_jwt_claim_enforcement "$out" human \
+                'https://issuer.invalid/oidc' hyperfleet-api
+            assert_jwt_claim_enforcement "$out" partner \
+                'https://partner-issuer.invalid/oidc' hyperfleet-partner-api
             assert_filter_order "$out" \
                 "($mode): ext_authz must precede router" \
                 'name: envoy.filters.http.ext_authz' \
