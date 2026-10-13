@@ -1,9 +1,12 @@
+{{- /* GENERATED_RABBITMQ_DIR (Makefile) overrides the generated values directory; relative paths are repo-relative */}}
+{{- $generated := env "GENERATED_RABBITMQ_DIR" | default "generated-values-rabbitmq" }}
+{{- if not (isAbs $generated) }}{{ $generated = printf "../../../%s" $generated }}{{ end }}
 sentinels:
   - name: clusters
     values:
       - config:
           resourceType: clusters
-      - {{ readFile "../../../generated-values-rabbitmq/sentinel-clusters.yaml" | fromYaml | toYaml | nindent 8 }}
+      - {{ readFile (printf "%s/sentinel-clusters.yaml" $generated) | fromYaml | toYaml | nindent 8 }}
 
   - name: nodepools
     values:
@@ -14,4 +17,4 @@ sentinels:
               id: "resource.owner_references.id"
               href: "resource.owner_references.href"
               kind: "resource.owner_references.kind"
-      - {{ readFile "../../../generated-values-rabbitmq/sentinel-nodepools.yaml" | fromYaml | toYaml | nindent 8 }}
+      - {{ readFile (printf "%s/sentinel-nodepools.yaml" $generated) | fromYaml | toYaml | nindent 8 }}

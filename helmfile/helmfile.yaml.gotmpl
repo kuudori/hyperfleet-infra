@@ -242,8 +242,14 @@ releases:
     needs:
       - hyperfleet-api
       - hyperfleet-gateway
+{{- if and (hasKey . "desireStoreClient") .desireStoreClient }}
+      - redis
+{{- end }}
     labels:
       component: adapter
+{{- if and (hasKey . "desireStoreClient") .desireStoreClient }}
+      desire-store-client: "true"
+{{- end }}
     values:
       - ./values/base-adapter.yaml.gotmpl
 {{ if hasKey . "values" }}

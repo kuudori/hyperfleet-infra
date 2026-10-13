@@ -53,8 +53,8 @@ The Makefile `export`s everything, so Helmfile reads these values through `env "
 Every environment delivers through API → Sentinel → remote adapter → Redis desire store → `hyperfleet-applier`. Helmfile deploys `helm/redis`, the applier chart (pulled from the `hyperfleet-applier` repo), and one remote adapter: `cl-desire` in `e2e-kind`/`e2e-gcp`, `adapter2` in `kind`/`gcp`. The remote adapter runs the adapter chart's `examples/remote-two-resources` task with the deployment config in `helmfile/values/remote-adapter.yaml.gotmpl`. Full description: README.md, "Desire delivery".
 
 - Maestro delivery runs alongside it: the e2e environments also deploy `cl-maestro`, and `local-up-kind`/`local-up-gcp` install Maestro.
-- A remote adapter entry sets `desireStoreClient: true`. The `redis-ingress` NetworkPolicy admits only those adapters and the applier.
-- `make validate-desire-delivery` (part of `ci-dry-run`) checks, for every environment, that each remote adapter transport is `remote` with `target_cluster` equal to the run namespace, which is the store partition the applier serves, and that Redis admits the adapter. Keep that invariant when you edit the remote adapter config.
+- A remote adapter entry sets `desireStoreClient: true`. The `redis-ingress` NetworkPolicy admits only those adapters and the applier, and their releases carry the `desire-store-client` label.
+- `make validate-desire-delivery` (part of `ci-dry-run`) checks, for every environment and every `desire-store-client` release, that each remote adapter transport is `remote` with `target_cluster` equal to the run namespace, which is the store partition the applier serves, and that Redis admits the adapter. Keep that invariant when you edit the remote adapter config.
 - Kind image builds always build the applier, so `PROJECTS_DIR` must contain `hyperfleet-applier` (or set `BUILD_IMAGES=false`).
 - `APPLIER_IMAGE_TAG` defaults to `latest` on GCP because the applier repo publishes no `dev` tag.
 

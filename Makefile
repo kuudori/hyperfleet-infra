@@ -383,6 +383,7 @@ check-human-token: check-kubectl-context check-jq ## Check mock human JWT tenant
 generate-rabbitmq-values: ## Generate Helm values for RabbitMQ deployments (HELMFILE_ENV=kind only)
 ifeq ($(HELMFILE_ENV),kind)
 	./scripts/generate-rabbitmq-values.sh \
+		--out-dir $(GENERATED_RABBITMQ_DIR) \
 		--rabbitmq-url $(RABBITMQ_URL) \
 		--namespace $(NAMESPACE)
 else
@@ -436,7 +437,7 @@ install-adapters: validate-helmfile-config ## Install Hyperfleet Adapters
 	helmfile apply -f helmfile/helmfile.yaml.gotmpl -e $(HELMFILE_ENV) -l component=adapter
 
 .PHONY: install-desire-delivery
-install-desire-delivery: check-helmfile-env check-hyperfleet-namespace ## Install the desire delivery stack (Redis desire store + hyperfleet-applier)
+install-desire-delivery: validate-helmfile-config check-hyperfleet-namespace ## Install the desire delivery stack (Redis desire store + hyperfleet-applier)
 	helmfile apply -f helmfile/helmfile.yaml.gotmpl -e $(HELMFILE_ENV) -l component=redis -l component=applier
 
 .PHONY: uninstall-hyperfleet
@@ -832,64 +833,56 @@ ci-validate: validate-terraform lint-helm lint-shellcheck validate-authorino ## 
 # environment and checks that each remote adapter serves this run: every
 # transport is remote with target_cluster set to the run namespace, which is the
 # store partition the applier serves, and the Redis NetworkPolicy admits the
-# adapter. kind and gcp read generated broker values, so missing files get
-# placeholders for the render and are removed afterwards. The template renders
-# only the remote adapter, Redis and the applier (against its chart schema), so
-# only those charts are fetched.
+# adapter. The remote adapters are the releases labelled desire-store-client.
+# kind and gcp read generated broker values, so the render points
+# GENERATED_RABBITMQ_DIR and GENERATED_DIR at placeholders in a temp directory.
+# The template renders only the remote adapters, Redis and the applier (against
+# its chart schema), so only those charts are fetched. The chart repositories
+# are added once before the loop, and each render skips that step.
 .PHONY: validate-desire-delivery
 validate-desire-delivery: check-helm ## Validate the desire delivery render (remote transport, run-namespace partition, Redis admission)
 	@echo "Validating desire delivery render..."
 	@set -eu; \
-	created_files=""; \
-	rabbitmq_values=$$(mktemp -d); \
-	cleanup_generated() { \
-		for file in $$created_files; do rm -f "$$file"; done; \
-		rmdir generated-values-rabbitmq generated-values-from-terraform 2>/dev/null || true; \
-		rm -rf "$$rabbitmq_values"; \
-	}; \
-	trap cleanup_generated EXIT; \
-	scripts/generate-rabbitmq-values.sh --out-dir "$$rabbitmq_values" --namespace hf-validate-kind \
+	generated=$$(mktemp -d); \
+	trap 'rm -rf "$$generated"' EXIT; \
+	mkdir "$$generated/rabbitmq" "$$generated/terraform"; \
+	scripts/generate-rabbitmq-values.sh --out-dir "$$generated/rabbitmq" --namespace hf-validate-kind \
 		--rabbitmq-url amqp://guest:guest@rabbitmq:5672 >/dev/null; \
 	for name in adapter1 adapter2 adapter3 sentinel-clusters sentinel-nodepools; do \
-		if [ ! -f "generated-values-rabbitmq/$$name.yaml" ]; then \
-			mkdir -p generated-values-rabbitmq; \
-			cp "$$rabbitmq_values/$$name.yaml" generated-values-rabbitmq/; \
-			created_files="$$created_files generated-values-rabbitmq/$$name.yaml"; \
-		fi; \
-		if [ ! -f "generated-values-from-terraform/$$name.yaml" ]; then \
-			mkdir -p generated-values-from-terraform; \
-			printf '%s\n' 'broker: {}' > "generated-values-from-terraform/$$name.yaml"; \
-			created_files="$$created_files generated-values-from-terraform/$$name.yaml"; \
-		fi; \
+		printf '%s\n' 'broker: {}' > "$$generated/terraform/$$name.yaml"; \
 	done; \
-	for pair in e2e-kind:cl-desire e2e-gcp:cl-desire kind:adapter2 gcp:adapter2; do \
-		env=$${pair%%:*}; adapter=$${pair#*:}; \
+	export GENERATED_RABBITMQ_DIR="$$generated/rabbitmq" GENERATED_DIR="$$generated/terraform"; \
+	selectors="-l desire-store-client=true -l name=redis -l name=hyperfleet-applier"; \
+	extract_doc() { \
+		awk -v name="$$1" ' \
+			/^---/ { if (keep) printf "%s", doc; doc = ""; keep = 0; next } \
+			{ doc = doc $$0 "\n" } \
+			$$0 == "  name: " name { keep = 1 } \
+			END { if (keep) printf "%s", doc }'; \
+	}; \
+	NAMESPACE=hf-validate RUN_ID=hf-validate helmfile -f helmfile/helmfile.yaml.gotmpl -e e2e-kind repos >/dev/null \
+		|| { echo "ERROR: Helmfile desire delivery repository setup failed"; exit 1; }; \
+	for env in e2e-kind e2e-gcp kind gcp; do \
 		ns=hf-validate-$$env; \
 		mode=mock; url=; \
 		if [ "$$env" = gcp ]; then mode=external; url=https://issuer.invalid; fi; \
 		export NAMESPACE=$$ns RUN_ID=$$ns OIDC_ISSUER_MODE=$$mode OIDC_ISSUER_URL=$$url; \
-		out=$$(helmfile -f helmfile/helmfile.yaml.gotmpl -e $$env -l name=$$adapter -l name=redis -l name=hyperfleet-applier template) \
+		out=$$(helmfile -f helmfile/helmfile.yaml.gotmpl -e $$env $$selectors template --skip-deps) \
 			|| { echo "ERROR: Helmfile desire delivery template failed for $$env"; exit 1; }; \
-		cfg=$$(echo "$$out" | awk -v name="$$adapter-hyperfleet-adapter-config" ' \
-			/^---/ { if (keep) printf "%s", doc; doc = ""; keep = 0; next } \
-			{ doc = doc $$0 "\n" } \
-			$$0 == "  name: " name { keep = 1 } \
-			END { if (keep) printf "%s", doc }'); \
-		[ -n "$$cfg" ] || { echo "ERROR ($$env): $$adapter adapter config ConfigMap was not rendered"; exit 1; }; \
-		echo "$$cfg" | awk -v ns="$$ns" ' \
-			/^    [^ #]/ { in_transports = ($$0 ~ /^    transports:/); next } \
-			in_transports && /^        type:/ { types++; if ($$2 != "remote") bad = 1 } \
-			in_transports && /^        target_cluster:/ { targets++; v = $$2; gsub(/"/, "", v); if (v != ns) bad = 1 } \
-			END { exit !(types > 0 && targets == types && !bad) }' \
-			|| { echo "ERROR ($$env): every $$adapter transport must be type remote with target_cluster \"$$ns\""; exit 1; }; \
-		policy=$$(echo "$$out" | awk ' \
-			/^---/ { if (keep) printf "%s", doc; doc = ""; keep = 0; next } \
-			{ doc = doc $$0 "\n" } \
-			/^  name: redis-ingress$$/ { keep = 1 } \
-			END { if (keep) printf "%s", doc }'); \
-		echo "$$policy" | grep -Eq "^ +app\.kubernetes\.io/instance: $$adapter$$" \
-			|| { echo "ERROR ($$env): the redis-ingress NetworkPolicy does not admit $$adapter"; exit 1; }; \
-		echo "OK: $$env routes $$adapter to partition $$ns and Redis admits it"; \
+		adapters=$$(echo "$$out" | sed -n 's/^  name: \(.*\)-hyperfleet-adapter-config$$/\1/p'); \
+		[ -n "$$adapters" ] || { echo "ERROR ($$env): no remote adapter (desireStoreClient) was rendered"; exit 1; }; \
+		policy=$$(echo "$$out" | extract_doc redis-ingress); \
+		for adapter in $$adapters; do \
+			echo "$$out" | extract_doc "$$adapter-hyperfleet-adapter-config" | awk -v ns="$$ns" ' \
+				/^    [^ #]/ { in_transports = ($$0 ~ /^    transports:/); next } \
+				in_transports && /^        type:/ { types++; if ($$2 != "remote") bad = 1 } \
+				in_transports && /^        target_cluster:/ { targets++; v = $$2; gsub(/"/, "", v); if (v != ns) bad = 1 } \
+				END { exit !(types > 0 && targets == types && !bad) }' \
+				|| { echo "ERROR ($$env): every $$adapter transport must be type remote with target_cluster \"$$ns\""; exit 1; }; \
+			echo "$$policy" | grep -Eq "^ +app\.kubernetes\.io/instance: $$adapter$$" \
+				|| { echo "ERROR ($$env): the redis-ingress NetworkPolicy does not admit $$adapter"; exit 1; }; \
+			echo "OK: $$env routes $$adapter to partition $$ns and Redis admits it"; \
+		done; \
 	done
 
 .PHONY: ci-dry-run
