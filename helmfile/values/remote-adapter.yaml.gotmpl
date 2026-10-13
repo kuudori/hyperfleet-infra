@@ -1,7 +1,8 @@
 {{- /*
-  Remote adapter: the adapter chart's shipped remote-two-resources example,
-  routed to the desire store. Its task config and manifests come from the chart
-  (adapterTaskConfig.files). Each environment's adapter-configs.yaml.gotmpl
+  Remote adapter: delivers a Namespace and a ConfigMap per cluster through the
+  desire store. Its task config and manifests live in
+  configs/base/adapters/remote/ and reach the chart through
+  adapterTaskConfig.external. Each environment's adapter-configs.yaml.gotmpl
   adds this file to one adapter entry, marks the entry desireStoreClient so the
   Redis NetworkPolicy admits it, and supplies the broker block.
 
@@ -11,10 +12,14 @@
 */}}
 adapterTaskConfig:
   create: true
-  files:
-    task-config.yaml: examples/remote-two-resources/adapter-task-config.yaml
-    namespace.yaml: examples/remote-two-resources/namespace.yaml
-    configmap.yaml: examples/remote-two-resources/configmap.yaml
+  # external keys become <key>.yaml ConfigMap keys
+  external:
+    task-config: |
+{{ readFile "../configs/base/adapters/remote/adapter-task-config.yaml" | indent 6 }}
+    namespace: |
+{{ readFile "../configs/base/adapters/remote/namespace.yaml" | indent 6 }}
+    configmap: |
+{{ readFile "../configs/base/adapters/remote/configmap.yaml" | indent 6 }}
 adapterConfig:
   create: true
   log:

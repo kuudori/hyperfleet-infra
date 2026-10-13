@@ -515,9 +515,9 @@ desire store → applier. In the run namespace Helmfile deploys:
   exceeds 63 characters). It serves the store partition named
   after the namespace and may manage only Namespaces and ConfigMaps.
 - The remote adapter: `cl-desire` in `e2e-kind` and `e2e-gcp`, `adapter2` in
-  `kind` and `gcp`. It runs the adapter chart's shipped
-  `examples/remote-two-resources` task, routed through a remote transport to
-  the same partition (`helmfile/values/remote-adapter.yaml.gotmpl`). The API
+  `kind` and `gcp`. It runs the task in `helmfile/configs/base/adapters/remote/`,
+  routed through a remote transport to the same partition
+  (`helmfile/values/remote-adapter.yaml.gotmpl`). The API
   requires it for clusters like any other adapter.
 
 The e2e environments also deploy `cl-maestro`, and `local-up-kind` and

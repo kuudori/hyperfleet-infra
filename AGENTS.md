@@ -50,7 +50,7 @@ The Makefile `export`s everything, so Helmfile reads these values through `env "
 
 ## Desire delivery
 
-Every environment delivers through API → Sentinel → remote adapter → Redis desire store → `hyperfleet-applier`. Helmfile deploys `helm/redis`, the applier chart (pulled from the `hyperfleet-applier` repo), and one remote adapter: `cl-desire` in `e2e-kind`/`e2e-gcp`, `adapter2` in `kind`/`gcp`. The remote adapter runs the adapter chart's `examples/remote-two-resources` task with the deployment config in `helmfile/values/remote-adapter.yaml.gotmpl`. Full description: README.md, "Desire delivery".
+Every environment delivers through API → Sentinel → remote adapter → Redis desire store → `hyperfleet-applier`. Helmfile deploys `helm/redis`, the applier chart (pulled from the `hyperfleet-applier` repo), and one remote adapter: `cl-desire` in `e2e-kind`/`e2e-gcp`, `adapter2` in `kind`/`gcp`. The remote adapter runs the task in `helmfile/configs/base/adapters/remote/` (shared by all four environments) with the deployment config in `helmfile/values/remote-adapter.yaml.gotmpl`. Full description: README.md, "Desire delivery".
 
 - Maestro delivery runs alongside it: the e2e environments also deploy `cl-maestro`, and `local-up-kind`/`local-up-gcp` install Maestro.
 - A remote adapter entry sets `desireStoreClient: true`. The `redis-ingress` NetworkPolicy admits only those adapters and the applier, and their releases carry the `desire-store-client` label.
