@@ -1,0 +1,65 @@
+{{- /*
+  Remote adapter: delivers a Namespace and a ConfigMap per cluster through the
+  desire store. Its task config and manifests live in
+  configs/base/adapters/remote/ and reach the chart through
+  adapterTaskConfig.external. Each environment's adapter-configs.yaml.gotmpl
+  adds this file to one adapter entry, marks the entry desireStoreClient so the
+  Redis NetworkPolicy admits it, and supplies the broker block.
+
+  The deployment config is a template rather than a setFiles file so
+  target_cluster renders as this namespace. The applier serves the same
+  partition (config.managementCluster in base-applier.yaml.gotmpl).
+*/}}
+adapterTaskConfig:
+  create: true
+  # external keys become <key>.yaml ConfigMap keys
+  external:
+    task-config: |
+{{ readFile "../configs/base/adapters/remote/adapter-task-config.yaml" | indent 6 }}
+    namespace: |
+{{ readFile "../configs/base/adapters/remote/namespace.yaml" | indent 6 }}
+    configmap: |
+{{ readFile "../configs/base/adapters/remote/configmap.yaml" | indent 6 }}
+adapterConfig:
+  create: true
+  log:
+    level: debug
+  yaml: |
+    adapter:
+      name: {{ .Release.Name }}
+
+    # Log the full merged configuration after load (default: false)
+    debug_config: false
+    log:
+      level: debug
+
+    clients:
+      hyperfleet_api:
+        base_url: CHANGE_ME
+        version: v1
+        timeout: 2s
+        retry_attempts: 3
+        retry_backoff: exponential
+
+      broker:
+        subscription_id: CHANGE_ME
+        topic: CHANGE_ME
+
+      kubernetes:
+        api_version: "v1"
+
+    # Names referenced by the example task config. Redis runs in this
+    # namespace without authentication.
+    stores:
+      remote-store:
+        type: redis
+        url: {{ .Values.desireStoreUrl }}
+
+    transports:
+      remote-primary:
+        type: remote
+        store: remote-store
+        target_cluster: "{{ .Values.namespace }}"
+        resource_plurals:
+          "v1/Namespace": namespaces
+          "v1/ConfigMap": configmaps

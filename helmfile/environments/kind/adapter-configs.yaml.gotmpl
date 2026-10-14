@@ -1,3 +1,6 @@
+{{- /* GENERATED_RABBITMQ_DIR (Makefile) overrides the generated values directory; relative paths are repo-relative */}}
+{{- $generated := env "GENERATED_RABBITMQ_DIR" | default "generated-values-rabbitmq" }}
+{{- if not (isAbs $generated) }}{{ $generated = printf "../../../%s" $generated }}{{ end }}
 adapters:
   - name: adapter1
     resourceType: clusters
@@ -7,20 +10,18 @@ adapters:
       - name: adapterTaskConfig.yaml
         file: configs/base/adapters/adapter1/adapter-task-config.yaml
     values:
-      - {{ readFile "../../../generated-values-rabbitmq/adapter1.yaml" | fromYaml | toYaml | nindent 8 }}
+      - {{ readFile (printf "%s/adapter1.yaml" $generated) | fromYaml | toYaml | nindent 8 }}
         rbac:
           resources:
             - configmaps
 
+  # Remote adapter: delivers through the desire store and the applier
   - name: adapter2
     resourceType: clusters
-    setFiles:
-      - name: adapterConfig.yaml
-        file: configs/base/adapters/adapter2/adapter-config.yaml
-      - name: adapterTaskConfig.yaml
-        file: configs/base/adapters/adapter2/adapter-task-config.yaml
+    desireStoreClient: true
     values:
-      - {{ readFile "../../../generated-values-rabbitmq/adapter2.yaml" | fromYaml | toYaml | nindent 8 }}
+      - ./values/remote-adapter.yaml.gotmpl
+      - {{ readFile (printf "%s/adapter2.yaml" $generated) | fromYaml | toYaml | nindent 8 }}
 
   - name: adapter3
     resourceType: nodepools
@@ -30,7 +31,7 @@ adapters:
       - name: adapterTaskConfig.yaml
         file: configs/base/adapters/adapter3/adapter-task-config.yaml
     values:
-      - {{ readFile "../../../generated-values-rabbitmq/adapter3.yaml" | fromYaml | toYaml | nindent 8 }}
+      - {{ readFile (printf "%s/adapter3.yaml" $generated) | fromYaml | toYaml | nindent 8 }}
         rbac:
           resources:
             - configmaps
