@@ -542,39 +542,19 @@ Variables only needed for kind environments (HELMFILE_ENV=kind/e2e-kind).
 
 ```
 hyperfleet-infra/
-├── Makefile                         # Entry point — run 'make help'
-├── env.gcp                          # GCP defaults (Google Pub/Sub, LoadBalancer)
-├── env.kind                         # kind defaults (RabbitMQ, ClusterIP)
-├── helmfile/
-│   ├── helmfile.yaml.gotmpl         # Helmfile orchestration
-│   ├── environments/                # Per-env configs (gcp, kind, e2e-gcp, e2e-kind)
-│   ├── configs/
-│   │   ├── base/adapters/           # Adapter configs (adapter1, adapter3; remote adapter2 uses values/remote-adapter.yaml.gotmpl)
-│   │   └── e2e/adapters/            # E2E adapter configs
-│   └── values/                      # Helm value templates (.gotmpl)
-├── helm/
-│   ├── rabbitmq/                    # Dev-only RabbitMQ (not production-ready)
-│   └── redis/                       # Dev-only desire store (not production-ready)
-├── scripts/
-│   ├── add-ttl-labels.sh            # Adds TTL labels to existing GKE clusters
-│   ├── generate-rabbitmq-values.sh  # Generates RabbitMQ broker config
-│   └── kind-build-images.sh         # Builds and loads images into kind
-├── functions/
-│   └── lifecycle-enforcer/          # Cloud Function: GKE cluster lifecycle enforcement
-├── terraform/
-│   ├── README.md                    # Detailed Terraform documentation
-│   ├── main.tf                      # Root module (GKE cluster, Pub/Sub, firewall, lifecycle)
-│   ├── helm-values-files.tf         # Writes generated Helm values via local_file
-│   ├── bootstrap/                   # One-time GCP setup scripts (admin only)
-│   ├── shared/                      # Shared VPC infrastructure (deploy once)
-│   ├── modules/
-│   │   ├── cluster/gke/             # GKE cluster module
-│   │   ├── lifecycle/               # Lifecycle enforcer (Cloud Function + Scheduler)
-│   │   └── pubsub/                  # Google Pub/Sub module
-│   └── envs/gke/                    # Per-developer tfvars and tfbackend files, prow config, CI templates
-├── generated-values-from-terraform/ # Auto-generated, gitignored
-└── generated-values-rabbitmq/       # Auto-generated, gitignored
+├── Makefile                          # Entry point: run 'make help'
+├── env.gcp, env.kind                 # Variable defaults (GCP: Pub/Sub, LoadBalancer; kind: RabbitMQ, ClusterIP)
+├── helmfile/                         # Helmfile state: per-env adapter and sentinel lists, adapter configs, value templates
+├── helm/                             # Local charts (gateway, Redis, RabbitMQ, mock OIDC, network policies, ...)
+├── manifests/                        # Plain Kubernetes manifests (priority classes, ...)
+├── scripts/                          # Helper scripts, most run through make targets
+├── terraform/                        # GKE and shared VPC stacks, OCI CI stack in terraform/oci/ (see terraform/README.md)
+├── functions/                        # Go cloud functions
+├── generated-values-from-terraform/  # Generated, gitignored
+└── generated-values-rabbitmq/        # Generated, gitignored
 ```
+
+The tree lists only the top level, which rarely changes, so it stays accurate.
 
 ## Generated Helm Values
 

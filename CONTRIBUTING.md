@@ -60,40 +60,7 @@ Configuration precedence (highest to lowest):
 
 ## Repository Structure
 
-```
-hyperfleet-infra/
-├── Makefile                         # Entry point — run 'make help'
-├── env.gcp                          # GCP defaults (Google Pub/Sub, LoadBalancer)
-├── env.kind                         # kind defaults (RabbitMQ, ClusterIP)
-├── helmfile/
-│   ├── helmfile.yaml.gotmpl         # Helmfile orchestration
-│   ├── environments/                # Per-env configs (gcp, kind, e2e-gcp, e2e-kind)
-│   ├── configs/
-│   │   ├── base/adapters/           # Adapter configs (adapter1, adapter3; remote adapter2 uses values/remote-adapter.yaml.gotmpl)
-│   │   └── e2e/adapters/            # E2E adapter configs
-│   └── values/                      # Helm value templates
-├── helm/
-│   └── rabbitmq/                    # Dev-only RabbitMQ chart
-├── scripts/
-│   ├── generate-rabbitmq-values.sh  # Generates RabbitMQ broker config
-│   └── kind-build-images.sh         # Builds and loads images into kind
-├── terraform/
-│   ├── README.md                    # Detailed Terraform documentation
-│   ├── main.tf                      # Root module (GKE cluster, Pub/Sub, firewall)
-│   ├── helm-values-files.tf         # Writes generated Helm values via local_file
-│   ├── bootstrap/                   # One-time GCP setup scripts (admin only)
-│   ├── shared/                      # Shared VPC infrastructure (deploy once)
-│   ├── modules/
-│   │   ├── cluster/gke/             # GKE cluster module
-│   │   └── pubsub/                  # Google Pub/Sub module
-│   └── envs/gke/                    # Per-developer tfvars and tfbackend files
-├── generated-values-from-terraform/ # Auto-generated, gitignored
-├── generated-values-rabbitmq/       # Auto-generated, gitignored
-├── README.md
-├── CONTRIBUTING.md
-├── AGENTS.md
-└── CHANGELOG.md
-```
+See [Repository Structure](README.md#repository-structure) in the README.
 
 ## Validation and Testing
 
