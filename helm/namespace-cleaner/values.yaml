@@ -1,6 +1,6 @@
 # Default values for namespace-cleaner
 
-# alpine/k8s includes kubectl, curl, jq, and bash
+# alpine/k8s includes kubectl and bash
 image:
   repository: alpine/k8s@sha256:15cfdf84d6de3559bc54d7479eb4e8aadbf71f6d7f08782cb1e91f3446f4b2d8
   pullPolicy: IfNotPresent
@@ -23,9 +23,6 @@ labelSelector: "hyperfleet.io/cluster-id hyperfleet.io/test-run e2e.hyperfleet.i
 
 # Delete namespaces older than this many minutes
 ageMinutes: 120
-
-# Maestro API base URL — used to delete resource bundles before removing namespaces
-maestroURL: "http://maestro.maestro.svc.cluster.local:8000"
 
 # When true, log what would be deleted without actually deleting anything
 dryRun: false

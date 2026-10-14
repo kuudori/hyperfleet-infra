@@ -14,7 +14,7 @@ Infrastructure as code that provisions HyperFleet dev and e2e environments with 
 
 ```bash
 make ci-validate     # terraform fmt + validate (terraform/ and terraform/oci/), helm lint, shellcheck, authorino templates
-make ci-dry-run      # ci-validate + render checks: maestro, mock OIDC, network policies, namespace cleaner, desire delivery
+make ci-dry-run      # ci-validate + GKE network policy mode tests + render checks: network policies, namespace cleaner, desire delivery
 ```
 
 Run `ci-validate` before proposing changes. `ci-dry-run` is the full pre-merge check, and Prow calls both.
@@ -52,7 +52,6 @@ The Makefile `export`s everything, so Helmfile reads these values through `env "
 
 Every environment delivers through API → Sentinel → remote adapter → Redis desire store → `hyperfleet-applier`. Helmfile deploys `helm/redis`, the applier chart (pulled from the `hyperfleet-applier` repo), and one remote adapter: `cl-desire` in `e2e-kind`/`e2e-gcp`, `adapter2` in `kind`/`gcp`. The remote adapter runs the task in `helmfile/configs/base/adapters/remote/` (shared by all four environments) with the deployment config in `helmfile/values/remote-adapter.yaml.gotmpl`. Full description: README.md, "Desire delivery".
 
-- Maestro delivery runs alongside it: the e2e environments also deploy `cl-maestro`, and `local-up-kind`/`local-up-gcp` install Maestro.
 - A remote adapter entry sets `desireStoreClient: true`. The `redis-ingress` NetworkPolicy admits only those adapters and the applier, and their releases carry the `desire-store-client` label.
 - `make validate-desire-delivery` (part of `ci-dry-run`) checks, for every environment and every `desire-store-client` release, that each remote adapter transport is `remote` with `target_cluster` equal to the run namespace, which is the store partition the applier serves, and that Redis admits the adapter. Keep that invariant when you edit the remote adapter config.
 - Kind image builds always build the applier, so `PROJECTS_DIR` must contain `hyperfleet-applier` (or set `BUILD_IMAGES=false`).
@@ -67,9 +66,7 @@ Every environment delivers through API → Sentinel → remote adapter → Redis
 
 ## Helm charts
 
-Local charts in `helm/`: `external-dns`, `hyperfleet-gateway`, `maestro`, `mock-oidc`, `namespace-cleaner`, `network-policies`, `rabbitmq`, `redis`. `rabbitmq` and `redis` are dev-only (no persistence, no auth or `guest/guest`) and not production-ready.
-
-`helm/maestro/` is an umbrella chart. It pulls its dependencies from `openshift-online/maestro` through `helm-git` at `ref=main`. `helm/maestro/charts/` is gitignored and `Chart.lock` is committed. `install-maestro` and `lint-helm` run `helm dependency update` for you, but running `helm template` directly fails until you do.
+Local charts in `helm/`: `external-dns`, `hyperfleet-gateway`, `mock-oidc`, `namespace-cleaner`, `network-policies`, `rabbitmq`, `redis`. `rabbitmq` and `redis` are dev-only (no persistence, no auth or `guest/guest`) and not production-ready.
 
 Required non-standard plugins (`check-helm` and `check-helmfile` verify them):
 
@@ -86,7 +83,7 @@ For kind image builds, `PROJECTS_DIR` must be the parent directory of those repo
 
 ## CI
 
-There is no `.github/workflows/`. CI runs on **Prow** (OpenShift CI) through the `ci-validate`, `ci-dry-run`, `ci-test`, `ci-cleanup` and `ci-tf-env` targets. `OWNERS` enforces PR approval.
+There is no `.github/workflows/`. CI runs on **Prow** (OpenShift CI). Prow calls `ci-dry-run` (which runs `ci-validate`) and `ci-tf-env`, plus the desire delivery and Terraform targets directly. `ci-test` and `ci-cleanup` are the local equivalents of the Prow integration job. `OWNERS` enforces PR approval.
 
 ## Common gotchas
 
@@ -95,9 +92,6 @@ For `HELMFILE_ENV=kind` or `e2e-kind`, it hard-fails unless the current kubectl 
 
 **`generate-rabbitmq-values` only works for `HELMFILE_ENV=kind`.**
 For other environments it silently does nothing.
-
-**`install-maestro` installs the AppliedManifestWorks CRD manually.**
-The upstream Maestro chart's CRD install is broken. `install-maestro` applies the CRD from `open-cluster-management-io/api` before the chart and sets `agent.installWorkCRDs=false`. Do not remove or reorder these steps.
 
 **The Authorino operator is a cluster-singleton prerequisite for gateway ext_authz.**
 With `EXT_AUTHZ_ENABLED=true`, the `hyperfleet-gateway` chart renders `Authorino` and `AuthConfig` CRs. `install-hyperfleet` installs the pinned operator (`AUTHORINO_OPERATOR_VERSION`) first through `maybe-install-authorino-operator`. If you apply the CRs before the operator exists, Helmfile fails on unknown CRDs.

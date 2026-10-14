@@ -49,8 +49,6 @@ OCI_TF_DIR       ?= terraform/oci
 GENERATED_RABBITMQ_DIR ?= generated-values-rabbitmq
 GENERATED_DIR ?= generated-values-from-terraform
 RABBITMQ_URL ?=  "amqp://guest:guest@rabbitmq:5672"
-MAESTRO_CONSUMER ?= cluster1
-MAESTRO_NAMESPACE ?= maestro
 KUBECONFIG ?= $(HOME)/.kube/config
 NETWORK_POLICY_CONTEXT ?=
 export NETWORK_POLICY_CONTEXT
@@ -64,11 +62,11 @@ TOKEN_SUBTENANT ?=
 TOKEN_MISSING_REQUIRED ?= false
 CURL_IMAGE ?= curlimages/curl:8.22.0@sha256:58adaa4e8dca9c988bae2aba4ab3434a0bb2da16bbe3f92dec39ec7785166777
 
-# Machine-token helper defaults. E2E environments deploy cl-maestro instead of
+# Machine-token helper defaults. E2E environments deploy cl-desire instead of
 # adapter1; override MACHINE_SERVICE_ACCOUNT to exercise a different allowed
 # (or denied) ServiceAccount through TokenReview.
 ifneq ($(filter $(HELMFILE_ENV),e2e-kind e2e-gcp),)
-MACHINE_SERVICE_ACCOUNT ?= cl-maestro-hyperfleet-adapter
+MACHINE_SERVICE_ACCOUNT ?= cl-desire-hyperfleet-adapter
 else
 MACHINE_SERVICE_ACCOUNT ?= adapter1-hyperfleet-adapter
 endif
@@ -99,7 +97,6 @@ CLEANER_NAMESPACE    ?= $(NAMESPACE)
 CLEANER_SCHEDULE     ?= 0 * * * *
 CLEANER_LABEL_SELECTOR ?= hyperfleet.io/cluster-id hyperfleet.io/test-run e2e/hyperfleet.io/run-id
 CLEANER_AGE_MINUTES  ?= 120
-CLEANER_MAESTRO_URL  ?= http://maestro.$(MAESTRO_NAMESPACE).svc.cluster.local:8000
 
 # ==== Terraform Targets ====
 .PHONY: install-terraform
@@ -213,80 +210,6 @@ lint-helmfile: check-helmfile ## Lint the helmfile for the current environment
 .PHONY: validate-helmfile-config
 validate-helmfile-config: check-helmfile-env ## Validate Helmfile inputs before applying imperative prerequisites
 	helmfile -f helmfile/helmfile.yaml.gotmpl -e $(HELMFILE_ENV) build
-
-# ==== Maestro Targets ====
-# NOTE: This is a workaround to install the AppliedManifestWorks CRD manually if there are issues installing via Helm - https://github.com/openshift-online/maestro/blob/main/charts/maestro-agent/templates/crd.yaml is not working as expected
-.PHONY: install-applied-manifest-crd
-install-applied-manifest-crd: check-kubectl ## Install AppliedManifestWorks CRD (for Maestro)
-	@echo "Installing AppliedManifestWorks CRD..."
-	@kubectl apply -f https://raw.githubusercontent.com/open-cluster-management-io/api/main/work/v1/0000_01_work.open-cluster-management.io_appliedmanifestworks.crd.yaml
-	@echo "OK: AppliedManifestWorks CRD installed"
-
-.PHONY: install-priority-classes
-install-priority-classes: check-kubectl ## Install PriorityClasses for critical infrastructure pods
-	@kubectl apply -f "$(MANIFESTS_DIR)/priority-classes.yaml"
-	@echo "OK: PriorityClasses applied"
-
-.PHONY: install-maestro
-install-maestro: check-helm check-kubectl check-maestro-namespace install-applied-manifest-crd install-priority-classes ## Install Maestro (server + agent)
-	helm dependency update $(HELM_DIR)/maestro
-	@echo "Installing Maestro..."
-	if ! helm upgrade --install $(DRY_RUN_FLAG) $(MAESTRO_NAMESPACE)-maestro $(HELM_DIR)/maestro \
-		--namespace $(MAESTRO_NAMESPACE) \
-		--set agent.installWorkCRDs=false \
-		--set agent.messageBroker.mqtt.host=maestro-mqtt.$(MAESTRO_NAMESPACE) \
-		--wait --timeout 5m ; then \
-		echo "Warning: maestro install failed on cluster; continuing"; \
-	fi; 
-	@echo "Waiting for Maestro pods to be ready..."
-	@kubectl wait --for=condition=ready pod -l app.kubernetes.io/instance=$(MAESTRO_NAMESPACE)-maestro --namespace $(MAESTRO_NAMESPACE) --timeout=180s || true
-	@echo "OK: Maestro pods are ready"
-
-
-.PHONY: create-maestro-consumer
-create-maestro-consumer: check-kubectl check-maestro-namespace check-jq ## Create a Maestro consumer (requires Maestro server running)
-	@echo "Validating MAESTRO_CONSUMER name..."
-	@if ! echo "$(MAESTRO_CONSUMER)" | grep -qE '^[a-zA-Z0-9_-]+$$'; then \
-		echo "ERROR: MAESTRO_CONSUMER='$(MAESTRO_CONSUMER)' contains invalid characters"; \
-		echo "       Only alphanumerics, dashes, and underscores are allowed"; \
-		exit 1; \
-	fi
-	@echo "Creating Maestro consumer '$(MAESTRO_CONSUMER)'..."
-	@payload=$$(echo '{}' | jq -c --arg name "$(MAESTRO_CONSUMER)" '{name: $$name}'); \
-	for i in 1 2 3 4 5; do \
-		exists=$$(kubectl exec deploy/maestro --namespace $(MAESTRO_NAMESPACE) -- \
-			curl -sS --connect-timeout 5 --max-time 10 http://maestro.$(MAESTRO_NAMESPACE).svc.cluster.local:8000/api/maestro/v1/consumers \
-			2>/dev/null | jq --arg name "$(MAESTRO_CONSUMER)" '[.items[]? | select(.name == $$name)] | length') 2>/dev/null || exists=0; \
-		if [ "$$exists" -gt 0 ]; then \
-			echo "OK: consumer '$(MAESTRO_CONSUMER)' already exists"; exit 0; \
-		fi; \
-		status=$$(kubectl exec deploy/maestro --namespace $(MAESTRO_NAMESPACE) --kubeconfig $(KUBECONFIG) -- \
-			curl -sS --connect-timeout 5 --max-time 10 -o /dev/null -w '%{http_code}' -X POST \
-			-H "Content-Type: application/json" \
-			http://maestro.$(MAESTRO_NAMESPACE).svc.cluster.local:8000/api/maestro/v1/consumers \
-			-d "$$payload" 2>/dev/null) 2>/dev/null || status="error"; \
-		case "$$status" in \
-			201) echo "OK: consumer '$(MAESTRO_CONSUMER)' created"; exit 0;; \
-			409) echo "WARNING: consumer '$(MAESTRO_CONSUMER)' already exists (race condition)"; exit 0;; \
-			*) echo "  Attempt $$i failed (status: $$status), retrying in 5s..."; sleep 5;; \
-		esac; \
-	done; \
-	echo "ERROR: failed to create Maestro consumer after 5 attempts"; exit 1
-
-.PHONY: install-maestro-all
-install-maestro-all: install-maestro create-maestro-consumer ## Install Maestro (server + agent + consumer)
-	@echo "OK: Maestro installed and consumer created"
-
-.PHONY: uninstall-applied-manifest-crd
-uninstall-applied-manifest-crd: check-kubectl ## Uninstall AppliedManifestWorks CRD (for Maestro)
-	@echo "Uninstalling AppliedManifestWorks CRD..."
-	@kubectl delete -f https://raw.githubusercontent.com/open-cluster-management-io/api/main/work/v1/0000_01_work.open-cluster-management.io_appliedmanifestworks.crd.yaml --ignore-not-found --request-timeout=30s --timeout 5m
-	@echo "OK: AppliedManifestWorks CRD uninstalled"
-
-.PHONY: uninstall-maestro
-uninstall-maestro: check-helm uninstall-applied-manifest-crd ## Uninstall Maestro
-	helm uninstall $(MAESTRO_NAMESPACE)-maestro --namespace $(MAESTRO_NAMESPACE) || true
-
 
 # ==== Gateway Security Targets ====
 .PHONY: install-cert-manager
@@ -506,7 +429,6 @@ install-cleaner: check-helm check-kubectl install-priority-classes ## Install na
 		--set-string "schedule=$(CLEANER_SCHEDULE)" \
 		--set-string "labelSelector=$(CLEANER_LABEL_SELECTOR)" \
 		--set "ageMinutes=$(CLEANER_AGE_MINUTES)" \
-		--set "maestroURL=$(CLEANER_MAESTRO_URL)" \
 		--wait
 	@echo "OK: namespace cleaner installed in namespace $(CLEANER_NAMESPACE)"
 
@@ -673,9 +595,10 @@ check-hyperfleet-namespace: ## Create Hyperfleet namespace if it doesn't exist a
 	@kubectl label namespace "$${NAMESPACE}" "hyperfleet.io/test-run=$${NAMESPACE}" --overwrite >/dev/null
 	@echo "OK: namespace $${NAMESPACE} labeled with hyperfleet.io/test-run=$${NAMESPACE}"
 
-.PHONY: check-maestro-namespace
-check-maestro-namespace: ## Create Maestro namespace if it doesn't exist
-	$(call check-namespace,MAESTRO_NAMESPACE)
+.PHONY: install-priority-classes
+install-priority-classes: check-kubectl ## Install PriorityClasses for critical infrastructure pods
+	@kubectl apply -f "$(MANIFESTS_DIR)/priority-classes.yaml"
+	@echo "OK: PriorityClasses applied"
 
 .PHONY: check-gke-context
 check-gke-context: check-kubectl ## Verify kubectl context points to GKE cluster
@@ -705,12 +628,10 @@ helm-deps: check-helm ## Run helm dependency update for all charts
 status: check-kubectl check-helmfile-env ## Show helm releases and pod status
 	@echo "=== Helm Releases ==="
 	@helm list --namespace $(NAMESPACE) 2>/dev/null || true
-	@helm list --namespace $(MAESTRO_NAMESPACE) 2>/dev/null || true
 	@helm list --namespace $(MONITORING_NAMESPACE) 2>/dev/null || true
 	@echo ""
 	@echo "=== Pods ==="
 	@kubectl get pods --namespace $(NAMESPACE) 2>/dev/null || true
-	@kubectl get pods --namespace $(MAESTRO_NAMESPACE) 2>/dev/null || true
 	@kubectl get pods --namespace $(MONITORING_NAMESPACE) 2>/dev/null || true
 
 .PHONY: help
@@ -745,12 +666,13 @@ help: ## Show this help message
 
 
 # ==== CI Targets ====
-# ci-dry-run: validation on terraform and helm plugins and maestro helm chart
-# ci-test: Run terraform install + maestro install + health check on maestro
-# ci-cleanup: Uninstall maestro and destroy terraform resources
+# ci-dry-run: validate terraform, lint charts and scripts, and check chart and
+#   Helmfile renders (network policies, namespace cleaner, desire delivery)
+# ci-test: install terraform, then deploy and health check the desire delivery
+#   stack (Redis desire store + hyperfleet-applier)
+# ci-cleanup: uninstall the desire delivery stack and destroy terraform resources
 
 # TODO: HYPERFLEET-1067 - Will add more complete helmfile linting and validation
-# Currently only linting, validating and installing via terrafrom and installing the maestro chart
 
 
 # CI-DRY-RUN
@@ -788,14 +710,6 @@ lint-shellcheck: ## Validate shell scripts with shellcheck
 	else \
 		echo "WARN: shellcheck not installed, skipping"; \
 	fi
-.PHONY: validate-maestro
-validate-maestro: check-helm ## Validate Maestro Helm chart rendering
-	helm dependency update $(HELM_DIR)/maestro
-	@echo "Validating maestro chart..."
-	helm template $(MAESTRO_NAMESPACE)-maestro $(HELM_DIR)/maestro \
-		--set agent.messageBroker.mqtt.host=maestro-mqtt.$(MAESTRO_NAMESPACE) > /dev/null
-	@echo "OK: all Helm charts rendered successfully"
-
 .PHONY: validate-authorino
 validate-authorino: check-helm ## Validate internal TLS and all gateway AUTH_MODE templates
 	@./scripts/validate-authorino.sh
@@ -888,21 +802,9 @@ validate-desire-delivery: check-helm ## Validate the desire delivery render (rem
 .PHONY: ci-dry-run
 ci-dry-run: ci-validate ## Ci dry-run: ci-validate + test GKE policy modes + validate chart rendering
 	$(MAKE) test-terraform-network-policy
-	$(MAKE) validate-maestro
 	$(MAKE) validate-network-policies
 	$(MAKE) validate-namespace-cleaner
 	$(MAKE) validate-desire-delivery
-
-.PHONY: health-check-maestro
-health-check-maestro: check-kubectl ## Verify Maestro Components
-	@echo "Checking Maestro components..."
-	@deploys=$$(kubectl get deployments --namespace $(MAESTRO_NAMESPACE) --kubeconfig $(KUBECONFIG) -o name) && \
-		[ -n "$$deploys" ] || { echo "ERROR: no deployments found in namespace $(MAESTRO_NAMESPACE)"; exit 1; }; \
-		for deploy in $$deploys; do \
-			echo "  Waiting for $$deploy..."; \
-			kubectl rollout status $$deploy --namespace $(MAESTRO_NAMESPACE) --kubeconfig $(KUBECONFIG) --timeout=300s || exit 1; \
-		done
-	@echo "OK: all components healthy"
 
 .PHONY: health-check-desire-delivery
 health-check-desire-delivery: check-kubectl ## Verify desire delivery components (Redis + applier)
@@ -916,7 +818,7 @@ health-check-desire-delivery: check-kubectl ## Verify desire delivery components
 	@echo "OK: desire delivery components healthy"
 
 .PHONY: ci-test
-ci-test: install-terraform get-credentials install-priority-classes install-maestro create-maestro-consumer health-check-maestro ## Ci test: install terraform + get credentials + install maestro + create maestro consumer + health check maestro
+ci-test: install-terraform get-credentials install-priority-classes install-desire-delivery health-check-desire-delivery ## Ci test: install terraform + get credentials + install priority classes + install desire delivery + health check desire delivery (run with HELMFILE_ENV=e2e-gcp)
 
 .PHONY: ci-tf-env
 ci-tf-env: ## Render ephemeral CI Terraform env files from the ci templates (CI_ID required)
@@ -929,20 +831,20 @@ ci-tf-env: ## Render ephemeral CI Terraform env files from the ci templates (CI_
 
 # CI-CLEANUP
 .PHONY: ci-cleanup
-ci-cleanup: uninstall-maestro destroy-terraform ## Ci cleanup: uninstall maestro + destroy terraform
+ci-cleanup: uninstall-desire-delivery destroy-terraform ## Ci cleanup: uninstall desire delivery + destroy terraform (run with HELMFILE_ENV=e2e-gcp)
 
 # ==== Full Deployment Targets ====
 # Kind targets
 
 .PHONY: local-up-kind
-local-up-kind: create-kind-cluster install-kind-cilium kind-build-images install-priority-classes install-maestro-all generate-rabbitmq-values maybe-install-grafana maybe-install-tracing install-hyperfleet health-check-desire-delivery ## Full local kind setup
+local-up-kind: create-kind-cluster install-kind-cilium kind-build-images install-priority-classes generate-rabbitmq-values maybe-install-grafana maybe-install-tracing install-hyperfleet health-check-desire-delivery ## Full local kind setup
 
 .PHONY: local-down-kind
-local-down-kind: uninstall-hyperfleet uninstall-tracing uninstall-grafana uninstall-maestro delete-kind-cluster ## Tear down kind stack and delete cluster
+local-down-kind: uninstall-hyperfleet uninstall-tracing uninstall-grafana delete-kind-cluster ## Tear down kind stack and delete cluster
 
 # GKE targets
 .PHONY: local-up-gcp
-local-up-gcp: install-terraform get-credentials install-priority-classes install-maestro-all maybe-install-grafana maybe-install-tracing install-hyperfleet health-check-desire-delivery ## Full gke setup
+local-up-gcp: install-terraform get-credentials install-priority-classes maybe-install-grafana maybe-install-tracing install-hyperfleet health-check-desire-delivery ## Full gke setup
 
 .PHONY: local-down-gcp
-local-down-gcp: get-credentials uninstall-hyperfleet uninstall-tracing uninstall-grafana uninstall-maestro destroy-terraform ## Tear down gke stack and destroy terraform
+local-down-gcp: get-credentials uninstall-hyperfleet uninstall-tracing uninstall-grafana destroy-terraform ## Tear down gke stack and destroy terraform

@@ -35,8 +35,6 @@ spec:
               value: {{ .Values.labelSelector | quote }}
             - name: AGE_MINUTES
               value: {{ .Values.ageMinutes | quote }}
-            - name: MAESTRO_URL
-              value: {{ .Values.maestroURL | quote }}
             - name: DRY_RUN
               value: {{ .Values.dryRun | quote }}
             resources:

@@ -14,7 +14,7 @@ MACHINE_TOKEN_DURATION="${MACHINE_TOKEN_DURATION:-10m}"
 
 if [[ -z "$MACHINE_SERVICE_ACCOUNT" ]]; then
     case "$HELMFILE_ENV" in
-        e2e-kind|e2e-gcp) MACHINE_SERVICE_ACCOUNT="cl-maestro-hyperfleet-adapter" ;;
+        e2e-kind|e2e-gcp) MACHINE_SERVICE_ACCOUNT="cl-desire-hyperfleet-adapter" ;;
         *) MACHINE_SERVICE_ACCOUNT="adapter1-hyperfleet-adapter" ;;
     esac
 fi
