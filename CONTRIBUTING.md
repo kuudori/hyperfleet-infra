@@ -73,7 +73,6 @@ hyperfleet-infra/
 │   │   └── e2e/adapters/            # E2E adapter configs
 │   └── values/                      # Helm value templates
 ├── helm/
-│   ├── maestro/                     # Maestro server + agent (umbrella chart)
 │   └── rabbitmq/                    # Dev-only RabbitMQ chart
 ├── scripts/
 │   ├── generate-rabbitmq-values.sh  # Generates RabbitMQ broker config
@@ -103,14 +102,13 @@ Run these before opening a PR:
 ### CI Validation
 ```bash
 make ci-validate     # terraform fmt+validate + lint checks
-make ci-dry-run      # ci-validate + maestro chart validation
+make ci-dry-run      # ci-validate + chart and Helmfile render checks
 ```
 
 Individual checks:
 
 ```bash
 make validate-terraform            # terraform init (no backend) + fmt check + validate
-make validate-maestro              # templates maestro charts
 make lint-helm                     # helm lint all charts under helm/*/
 make lint-shellcheck               # shellcheck all *.sh
 HELMFILE_ENV=<env> make lint-helmfile
@@ -127,7 +125,7 @@ export NAMESPACE=hyperfleet-local
 
 # Step by step installation
 make create-kind-cluster
-make install-maestro-all
+make install-kind-cilium
 make generate-rabbitmq-values
 make kind-build-images
 make install-hyperfleet
@@ -142,9 +140,7 @@ make local-up-kind
 
 ```bash
 export NAMESPACE=<e2e_namespace>
-kubectl port-forward -n maestro svc/maestro 8001:8000 &
 kubectl port-forward -n $NAMESPACE svc/hyperfleet-gateway 8000:8000 &
-export MAESTRO_URL=http://localhost:8001
 export HYPERFLEET_API_URL=http://localhost:8000
 ```
 
@@ -165,7 +161,6 @@ export NAMESPACE=hyperfleet
 # Step by step installation
 make install-terraform
 make get-credentials
-make install-maestro-all
 make install-hyperfleet
 
 # One-shot installation
@@ -176,9 +171,6 @@ make local-up-gcp
 
 #### Required Variables for E2E tests:
 ```bash
-kubectl patch svc maestro -n maestro -p '{"spec":{"type":"LoadBalancer"}}'
-export MAESTRO_EXTERNAL_IP=$(kubectl get svc maestro -n maestro -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-export MAESTRO_URL=http://${MAESTRO_EXTERNAL_IP}:8000
 export API_EXTERNAL_IP=$(kubectl get svc hyperfleet-gateway -n $NAMESPACE -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
 export HYPERFLEET_API_URL=http://${API_EXTERNAL_IP}:8000
 ```
@@ -226,7 +218,6 @@ export NAMESPACE=<namespace>
 
 # for individual targets
 make uninstall-hyperfleet
-make uninstall-maestro
 make delete-kind-cluster
 
 # for full teardown
@@ -241,7 +232,6 @@ export NAMESPACE=<namespace>
 
 # for individual targets
 make uninstall-hyperfleet
-make uninstall-maestro
 make destroy-terraform
 
 # for full teardown

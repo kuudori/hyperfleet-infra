@@ -123,15 +123,6 @@ needs to be run explicitly for a standalone/one-off install.
 | `make get-credentials` | Configure kubectl from terraform output |
 | `make destroy-terraform` | Destroy Terraform-managed infrastructure |
 
-### Maestro
-
-| Target | Description |
-| -------- | ------------- |
-| `make install-maestro` | Install Maestro server + agent (runs `helm dependency update` first) |
-| `make create-maestro-consumer` | Create a Maestro consumer (requires Maestro running) |
-| `make install-maestro-all` | `install-maestro` + `create-maestro-consumer` |
-| `make uninstall-maestro` | Uninstall Maestro |
-
 ### Tracing
 
 Set `TRACING_ENABLED=true` and `OBSERVABILITY_ENABLED=true`.
@@ -185,10 +176,10 @@ configurable in the chart values.
 
 | Target | Description |
 | -------- | ------------- |
-| `make ci-dry-run` | `ci-validate` + `validate maestro` + `validate namespace cleaner` + other chart/config checks |
+| `make ci-dry-run` | `ci-validate` + `test-terraform-network-policy` + `validate-network-policies` + `validate-namespace-cleaner` + `validate-desire-delivery` |
 | `make validate-desire-delivery` | Render the remote adapters (the `desire-store-client` releases), Redis and the applier for every environment; fail if a remote adapter transport is not remote with `target_cluster` set to the namespace, or if the Redis NetworkPolicy does not admit the adapter (part of `ci-dry-run`) |
-| `make ci-test` | `install terraform` + `get-credentials` + `install-maestro` + `create-maestro-consumer` + `health-check-maestro` |
-| `make ci-cleanup` | `uninstall-maestro` + `destroy-terraform` |
+| `make ci-test` | `install-terraform` + `get-credentials` + `install-priority-classes` + `install-desire-delivery` + `health-check-desire-delivery`. Run with `HELMFILE_ENV=e2e-gcp`: the default `gcp` needs Terraform-generated values |
+| `make ci-cleanup` | `uninstall-desire-delivery` + `destroy-terraform`. Run with `HELMFILE_ENV=e2e-gcp`, like `ci-test` |
 | `make ci-tf-env CI_ID=<id>` | Render `envs/gke/ci-<id>.tfvars` and `.tfbackend` for an ephemeral CI cluster from `ci.tfvars.template` and `ci.tfbackend.template` |
 
 ## Environment Variables
@@ -197,7 +188,6 @@ configurable in the chart values.
 | ---------- | ------------ | -------------- | ------- |
 | `HELMFILE_ENV` | `gcp` | `kind` | Also `e2e-gcp`, `e2e-kind` |
 | `NAMESPACE` | `hyperfleet` | `hyperfleet-local` | e2e envs use `hyperfleet-e2e[-$USER]` |
-| `MAESTRO_NAMESPACE` | `maestro` | `maestro` | |
 | `REGISTRY` | `quay.io` | `localhost` | |
 | `API_REPOSITORY` | `redhat-services-prod/hyperfleet-tenant/hyperfleet/hyperfleet-api` | `hyperfleet-api` | |
 | `SENTINEL_REPOSITORY` | `redhat-services-prod/hyperfleet-tenant/hyperfleet/hyperfleet-sentinel` | `hyperfleet-sentinel` | |
@@ -215,12 +205,10 @@ configurable in the chart values.
 | `APPLIER_CHART_REF` | `main` | `main` | Git ref for the applier chart |
 | `TF_ENV` | `dev` | N/A | Selects `envs/gke/<TF_ENV>.tfvars` |
 | `RABBITMQ_URL` | N/A | `amqp://guest:guest@rabbitmq:5672` | |
-| `MAESTRO_CONSUMER` | `cluster1` | `cluster1` | |
 | `CLEANER_NAMESPACE` | `$(NAMESPACE)` | `$(NAMESPACE)` | Namespace to install the cleaner into |
 | `CLEANER_SCHEDULE` | `0 * * * *` | `0 * * * *` | Cron schedule for the cleaner job |
 | `CLEANER_LABEL_SELECTOR` | `hyperfleet.io/cluster-id` | `hyperfleet.io/cluster-id` | Label selector to identify orphan namespaces |
 | `CLEANER_AGE_MINUTES` | `120` | `120` | Minimum age (minutes) before a namespace is eligible for cleanup |
-| `CLEANER_MAESTRO_URL` | `http://maestro.$(MAESTRO_NAMESPACE).svc.cluster.local:8000` | `http://maestro.$(MAESTRO_NAMESPACE).svc.cluster.local:8000` | Maestro API URL used by the cleaner |
 | `OBSERVABILITY_ENABLED` | `false` | `false` | Set to `true` to deploy kube-prometheus-stack (Prometheus + Grafana) and enable ServiceMonitors |
 | `TRACING_ENABLED` | `false` | `false` | Set to `true` to deploy Tempo + OpenTelemetry Collector and enable OTLP tracing (requires `OBSERVABILITY_ENABLED=true`) |
 | `MONITORING_NAMESPACE` | `monitoring` | `monitoring` | Namespace for the observability helmfile releases |
@@ -484,7 +472,7 @@ this mode.
 
 `make mint-machine-token` requests a short-lived TokenRequest API JWT for a
 ServiceAccount. It defaults to `adapter1-hyperfleet-adapter` for `kind` and
-`gcp`, and `cl-maestro-hyperfleet-adapter` for `e2e-kind` and `e2e-gcp`. It
+`gcp`, and `cl-desire-hyperfleet-adapter` for `e2e-kind` and `e2e-gcp`. It
 uses the `hyperfleet-api` audience and a 10-minute duration—the Kubernetes API
 server minimum—and prints only the JWT to stdout. Override
 `MACHINE_SERVICE_ACCOUNT`, `MACHINE_TOKEN_AUDIENCE`, or
@@ -520,10 +508,9 @@ desire store → applier. In the run namespace Helmfile deploys:
   (`helmfile/values/remote-adapter.yaml.gotmpl`). The API
   requires it for clusters like any other adapter.
 
-The e2e environments also deploy `cl-maestro`, and `local-up-kind` and
-`local-up-gcp` also install Maestro. Kind image builds include the applier, so
-`PROJECTS_DIR` must contain `hyperfleet-applier` (or set `BUILD_IMAGES=false`).
-Both bring-up targets end with `make health-check-desire-delivery`.
+Kind image builds include the applier, so `PROJECTS_DIR` must contain
+`hyperfleet-applier` (or set `BUILD_IMAGES=false`). `make local-up-kind` and
+`make local-up-gcp` both end with `make health-check-desire-delivery`.
 
 `make install-desire-delivery` and `make uninstall-desire-delivery` manage only
 the `redis` and `hyperfleet-applier` releases, for example in a cluster where
@@ -566,7 +553,6 @@ hyperfleet-infra/
 │   │   └── e2e/adapters/            # E2E adapter configs
 │   └── values/                      # Helm value templates (.gotmpl)
 ├── helm/
-│   ├── maestro/                     # Maestro umbrella chart (deps via helm-git)
 │   ├── rabbitmq/                    # Dev-only RabbitMQ (not production-ready)
 │   └── redis/                       # Dev-only desire store (not production-ready)
 ├── scripts/

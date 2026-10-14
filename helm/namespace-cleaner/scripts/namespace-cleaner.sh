@@ -3,7 +3,6 @@ set -eo pipefail
 
 LABEL_SELECTOR="${LABEL_SELECTOR:-hyperfleet.io/cluster-id hyperfleet.io/test-run}"
 AGE_MINUTES="${AGE_MINUTES:-120}"
-MAESTRO_URL="${MAESTRO_URL:-http://maestro.maestro.svc.cluster.local:8000}"
 DRY_RUN="${DRY_RUN:-false}"
 
 if [ -z "${LABEL_SELECTOR}" ]; then
@@ -32,46 +31,9 @@ parse_timestamp() {
     || TZ=UTC date -j -f "%Y-%m-%dT%H:%M:%SZ" "${ts}" +%s
 }
 
-echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) [INFO] Starting namespace cleaner (label_selector=${LABEL_SELECTOR}, age_minutes=${AGE_MINUTES}, maestro_url=${MAESTRO_URL}, dry_run=${DRY_RUN})"
+echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) [INFO] Starting namespace cleaner (label_selector=${LABEL_SELECTOR}, age_minutes=${AGE_MINUTES}, dry_run=${DRY_RUN})"
 
-# --- Step 1: delete stale Maestro resource bundles ---
-if curl -sf --connect-timeout 5 --max-time 10 "${MAESTRO_URL}/api/maestro/v1/consumers" > /dev/null 2>&1; then
-  BUNDLES_JSON=$(curl -sS --max-time 30 "${MAESTRO_URL}/api/maestro/v1/resource-bundles?size=500" || true)
-  total=$(echo "${BUNDLES_JSON}" | jq '.total' 2>/dev/null || true)
-  if ! printf '%s' "${total}" | grep -qE '^[0-9]+$'; then
-    echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) [WARN] Could not parse Maestro bundle response, skipping bundle cleanup"
-  else
-    echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) [INFO] Fetched ${total} Maestro resource bundles"
-    if [ "${total}" -gt 500 ]; then
-      echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) [WARN] More than 500 bundles exist; only the first 500 will be considered"
-    fi
-
-    echo "${BUNDLES_JSON}" | jq -r '.items[] | "\(.id) \(.created_at)"' \
-    | while read -r bundle_id created_at; do
-        created_seconds=$(parse_timestamp "${created_at}") || continue
-        age=$((NOW - created_seconds))
-        if [ "${age}" -gt "${AGE_SECONDS}" ]; then
-          age_m=$((age / 60))
-          if [ "${DRY_RUN}" = "true" ]; then
-            echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) [DRY-RUN] Would delete Maestro bundle '${bundle_id}' (age=${age_m}m)"
-          else
-            echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) [INFO] Deleting Maestro bundle '${bundle_id}' (age=${age_m}m)"
-            http_code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 -X DELETE \
-              "${MAESTRO_URL}/api/maestro/v1/resource-bundles/${bundle_id}")
-            if [ "${http_code}" = "204" ]; then
-              echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) [INFO] Maestro bundle '${bundle_id}' deleted"
-            else
-              echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) [WARN] Maestro bundle delete returned HTTP ${http_code} for '${bundle_id}'"
-            fi
-          fi
-        fi
-      done || true
-  fi
-else
-  echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) [WARN] Maestro API not reachable at ${MAESTRO_URL}, skipping bundle cleanup"
-fi
-
-# --- Step 2: delete stale namespaces (non-blocking) ---
+# --- Delete stale namespaces (non-blocking) ---
 # LABEL_SELECTOR may contain multiple space-separated selectors; each is matched
 # independently (OR semantics). Namespaces already Terminating are skipped.
 IFS=' ' read -ra _selectors <<< "${LABEL_SELECTOR}"
