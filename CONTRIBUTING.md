@@ -69,7 +69,7 @@ Run these before opening a PR:
 ### CI Validation
 ```bash
 make ci-validate     # terraform fmt+validate + lint checks
-make ci-dry-run      # ci-validate + chart and Helmfile render checks
+make ci-dry-run      # ci-validate + GKE network policy mode tests + render checks: network policies, namespace cleaner, desire delivery
 ```
 
 Individual checks:

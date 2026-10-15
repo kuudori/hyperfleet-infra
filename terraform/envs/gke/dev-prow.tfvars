@@ -58,7 +58,7 @@ network_policy_mode = "calico"
 # To destroy, you must first set this to false, apply, then destroy
 enable_deletion_protection = true
 
-# Automatic GKE upgrades drain the node and restart Maestro, so keep them away
+# Automatic GKE upgrades drain the node and interrupt running e2e jobs, so keep them away
 # from the nightlies (09:30, 11:30, 13:30 UTC daily) and weekday presubmits.
 # Saturday and Sunday 18:00-06:00 UTC, 24h a week (GKE needs 48h in 32 days).
 maintenance_recurring_window = {

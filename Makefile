@@ -95,7 +95,7 @@ OCI_SWEEP_DIR        ?= functions/oci-ci-sweep
 
 CLEANER_NAMESPACE    ?= $(NAMESPACE)
 CLEANER_SCHEDULE     ?= 0 * * * *
-CLEANER_LABEL_SELECTOR ?= hyperfleet.io/cluster-id hyperfleet.io/test-run e2e/hyperfleet.io/run-id
+CLEANER_LABEL_SELECTOR ?= hyperfleet.io/cluster-id hyperfleet.io/test-run e2e.hyperfleet.io/run-id
 CLEANER_AGE_MINUTES  ?= 120
 
 # ==== Terraform Targets ====
