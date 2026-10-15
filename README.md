@@ -207,7 +207,7 @@ configurable in the chart values.
 | `RABBITMQ_URL` | N/A | `amqp://guest:guest@rabbitmq:5672` | |
 | `CLEANER_NAMESPACE` | `$(NAMESPACE)` | `$(NAMESPACE)` | Namespace to install the cleaner into |
 | `CLEANER_SCHEDULE` | `0 * * * *` | `0 * * * *` | Cron schedule for the cleaner job |
-| `CLEANER_LABEL_SELECTOR` | `hyperfleet.io/cluster-id` | `hyperfleet.io/cluster-id` | Label selector to identify orphan namespaces |
+| `CLEANER_LABEL_SELECTOR` | `hyperfleet.io/cluster-id hyperfleet.io/test-run e2e.hyperfleet.io/run-id` | `hyperfleet.io/cluster-id hyperfleet.io/test-run e2e.hyperfleet.io/run-id` | Space-separated label selectors to identify orphan namespaces; a namespace matching any of them is eligible |
 | `CLEANER_AGE_MINUTES` | `120` | `120` | Minimum age (minutes) before a namespace is eligible for cleanup |
 | `OBSERVABILITY_ENABLED` | `false` | `false` | Set to `true` to deploy kube-prometheus-stack (Prometheus + Grafana) and enable ServiceMonitors |
 | `TRACING_ENABLED` | `false` | `false` | Set to `true` to deploy Tempo + OpenTelemetry Collector and enable OTLP tracing (requires `OBSERVABILITY_ENABLED=true`) |
