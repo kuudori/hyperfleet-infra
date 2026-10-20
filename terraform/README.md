@@ -30,7 +30,7 @@ Terraform configuration for creating personal HyperFleet development clusters.
 
 ## Prerequisites
 
-- [Terraform](https://developer.hashicorp.com/terraform/downloads) >= 1.7 (local pin: 1.13.1 in `.tool-versions`; Prow validate pin: 1.9.8 in [openshift/release](https://github.com/openshift/release/blob/main/ci-operator/config/openshift-hyperfleet/hyperfleet-infra/openshift-hyperfleet-hyperfleet-infra-main.yaml))
+- [Terraform](https://developer.hashicorp.com/terraform/downloads) >= 1.7 (local pin: 1.13.1 in `.tool-versions`; CI tools pin: 1.9.8 in [ci/tools/Dockerfile](../ci/tools/Dockerfile))
 - [Google Cloud SDK](https://cloud.google.com/sdk/docs/install) (`gcloud`)
 - [gke-gcloud-auth-plugin](https://cloud.google.com/kubernetes-engine/docs/how-to/cluster-access-for-kubectl#install_plugin) (for kubectl access)
 - `kubectl`
