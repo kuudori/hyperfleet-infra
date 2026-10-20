@@ -432,17 +432,21 @@ add-ttl-labels: ## Add TTL labels to existing GKE clusters (DRY_RUN=true by defa
 build-ci-tools: check-container-tool ## Build the CI tools image (the Prow build root) as CI_TOOLS_IMAGE
 	$(CONTAINER_TOOL) build --platform $(CI_TOOLS_PLATFORM) -t $(CI_TOOLS_IMAGE) $(CI_TOOLS_DIR)
 
-# test-ci-tools runs the tracked files, uncommitted edits included, in the image
-# as an arbitrary UID, like Prow. git archive keeps host .terraform directories
-# and lock files out. The terraform init without network access proves that the
-# providers come from the image's mirror.
+# test-ci-tools runs the working tree in the image as an arbitrary UID, like
+# Prow. A temporary index turns the working tree into a git tree: new files are
+# in it, and gitignored paths such as .terraform directories and lock files are
+# not. The real index does not change. The terraform init without network access
+# proves that the providers come from the image's mirror.
 .PHONY: test-ci-tools
 test-ci-tools: build-ci-tools ## Run ci-dry-run, then terraform init without network access, in the CI tools image
 	@set -eu; \
-	rev=$$(git stash create); rev=$${rev:-HEAD}; \
-	git archive "$$rev" | $(CONTAINER_TOOL) run -i --rm --platform $(CI_TOOLS_PLATFORM) --user 12345:0 -e CI=true \
+	index=$$(mktemp); trap 'rm -f "$$index"' EXIT; \
+	cp "$$(git rev-parse --git-path index)" "$$index"; \
+	GIT_INDEX_FILE="$$index" git add -A; \
+	tree=$$(GIT_INDEX_FILE="$$index" git write-tree); \
+	git archive "$$tree" | $(CONTAINER_TOOL) run -i --rm --platform $(CI_TOOLS_PLATFORM) --user 12345:0 -e CI=true \
 		$(CI_TOOLS_IMAGE) bash -euc 'mkdir /tmp/infra && tar -x -C /tmp/infra && cd /tmp/infra && make ci-dry-run'; \
-	git archive "$$rev" | $(CONTAINER_TOOL) run -i --rm --platform $(CI_TOOLS_PLATFORM) --user 12345:0 --network none \
+	git archive "$$tree" | $(CONTAINER_TOOL) run -i --rm --platform $(CI_TOOLS_PLATFORM) --user 12345:0 --network none \
 		$(CI_TOOLS_IMAGE) bash -euc 'mkdir /tmp/infra && tar -x -C /tmp/infra && cd /tmp/infra && for dir in $(TF_DIR) $(OCI_TF_DIR); do (cd "$$dir" && terraform init -backend=false && terraform validate); done'; \
 	echo "OK: $(CI_TOOLS_IMAGE) passed ci-dry-run and installed the providers without network access"
 

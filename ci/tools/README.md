@@ -30,10 +30,9 @@ make build-ci-tools   # podman or docker; set CONTAINER_TOOL to choose
 make test-ci-tools    # build, then run ci-dry-run and terraform init without network access in the image
 ```
 
-`test-ci-tools` runs the tracked files, uncommitted edits included, as an
-arbitrary UID, like Prow. Add new files with `git add` first. Under qemu
-emulation on Apple Silicon the image's Go tools crash (`fatal error:
-lfstack.push`), so run the checks on an amd64 host.
+`test-ci-tools` runs the working tree, without gitignored files, as an arbitrary
+UID, like Prow. Under qemu emulation on Apple Silicon the image's Go tools crash
+(`fatal error: lfstack.push`), so run the checks on an amd64 host.
 
 ## Bumping pins
 
