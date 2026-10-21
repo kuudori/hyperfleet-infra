@@ -93,6 +93,13 @@ CERT_MANAGER_MANIFEST_SHA256 ?= e03b668ec8675214af6b0a671699d088f2601fa3878e0dbe
 LIFECYCLE_DIR        ?= functions/lifecycle-enforcer
 OCI_SWEEP_DIR        ?= functions/oci-ci-sweep
 
+# CI tools image (the Prow build root). The platform variable is not PLATFORM:
+# make exports every variable, and kind-build-images.sh reads PLATFORM.
+CI_TOOLS_DIR         ?= ci/tools
+CI_TOOLS_IMAGE       ?= localhost/hyperfleet-infra-tools:dev
+CI_TOOLS_PLATFORM    ?= linux/amd64
+CONTAINER_TOOL       ?= $(shell command -v podman 2>/dev/null || command -v docker 2>/dev/null)
+
 CLEANER_NAMESPACE    ?= $(NAMESPACE)
 CLEANER_SCHEDULE     ?= 0 * * * *
 CLEANER_LABEL_SELECTOR ?= hyperfleet.io/cluster-id hyperfleet.io/test-run e2e.hyperfleet.io/run-id
@@ -420,6 +427,29 @@ lint-oci-sweep-function: ## Lint the OCI CI compartment sweep function
 add-ttl-labels: ## Add TTL labels to existing GKE clusters (DRY_RUN=true by default)
 	./scripts/add-ttl-labels.sh
 
+# ==== CI Tools Image Targets ====
+.PHONY: build-ci-tools
+build-ci-tools: check-container-tool ## Build the CI tools image (the Prow build root) as CI_TOOLS_IMAGE
+	$(CONTAINER_TOOL) build --platform $(CI_TOOLS_PLATFORM) -t $(CI_TOOLS_IMAGE) $(CI_TOOLS_DIR)
+
+# test-ci-tools runs the working tree in the image as an arbitrary UID, like
+# Prow. A temporary index turns the working tree into a git tree: new files are
+# in it, and gitignored paths such as .terraform directories and lock files are
+# not. The real index does not change. The terraform init without network access
+# proves that the providers come from the image's mirror.
+.PHONY: test-ci-tools
+test-ci-tools: build-ci-tools ## Run ci-dry-run, then terraform init without network access, in the CI tools image
+	@set -eu; \
+	index=$$(mktemp); trap 'rm -f "$$index"' EXIT; \
+	cp "$$(git rev-parse --git-path index)" "$$index"; \
+	GIT_INDEX_FILE="$$index" git add -A; \
+	tree=$$(GIT_INDEX_FILE="$$index" git write-tree); \
+	git archive "$$tree" | $(CONTAINER_TOOL) run -i --rm --platform $(CI_TOOLS_PLATFORM) --user 12345:0 -e CI=true \
+		$(CI_TOOLS_IMAGE) bash -euc 'mkdir /tmp/infra && tar -x -C /tmp/infra && cd /tmp/infra && make ci-dry-run'; \
+	git archive "$$tree" | $(CONTAINER_TOOL) run -i --rm --platform $(CI_TOOLS_PLATFORM) --user 12345:0 --network none \
+		$(CI_TOOLS_IMAGE) bash -euc 'mkdir /tmp/infra && tar -x -C /tmp/infra && cd /tmp/infra && for dir in $(TF_DIR) $(OCI_TF_DIR); do (cd "$$dir" && terraform init -backend=false && terraform validate); done'; \
+	echo "OK: $(CI_TOOLS_IMAGE) passed ci-dry-run and installed the providers without network access"
+
 # ==== Namespace Cleaner Targets ====
 .PHONY: install-cleaner
 install-cleaner: check-helm check-kubectl install-priority-classes ## Install namespace cleaner CronJob (CLEANER_SCHEDULE, CLEANER_LABEL_SELECTOR, CLEANER_AGE_MINUTES)
@@ -535,6 +565,11 @@ check-kubectl: ## Verify kubectl is installed and context is set
 check-jq: ## Verify jq is installed
 	@command -v jq >/dev/null 2>&1 || { echo "ERROR: jq is not installed. Install with: brew install jq"; exit 1; }
 	@echo "OK: jq found"
+
+.PHONY: check-container-tool
+check-container-tool: ## Verify podman or docker is installed
+	@[ -n "$(CONTAINER_TOOL)" ] || { echo "ERROR: podman or docker is not installed. Install one, or set CONTAINER_TOOL"; exit 1; }
+	@echo "OK: container tool found: $(CONTAINER_TOOL)"
 
 .PHONY: check-helmfile-env
 check-helmfile-env: check-helmfile check-kubectl-context check-helmfile-env-generated ## Verify kubectl context and generated values directory exists
@@ -679,6 +714,7 @@ help: ## Show this help message
 .PHONY: validate-terraform
 validate-terraform: check-terraform ## Validate Terraform syntax and formatting (all stacks)
 	cd $(TF_DIR) && terraform fmt -check -recursive -diff
+	terraform fmt -check -diff $(CI_TOOLS_DIR)
 	@for dir in $(TF_DIR) $(OCI_TF_DIR); do \
 		echo "Validating Terraform in $$dir..."; \
 		( cd "$$dir" && terraform init -backend=false && terraform validate ) || exit 1; \

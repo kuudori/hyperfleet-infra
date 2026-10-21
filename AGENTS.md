@@ -13,7 +13,7 @@ Infrastructure as code that provisions HyperFleet dev and e2e environments with 
 ## Validation commands
 
 ```bash
-make ci-validate     # terraform fmt + validate (terraform/ and terraform/oci/), helm lint, shellcheck, authorino templates
+make ci-validate     # terraform fmt (terraform/, ci/tools/) + validate (terraform/, terraform/oci/), helm lint, shellcheck, authorino templates
 make ci-dry-run      # ci-validate + GKE network policy mode tests + render checks: network policies, namespace cleaner, desire delivery
 ```
 
@@ -22,6 +22,8 @@ Run `ci-validate` before proposing changes. `ci-dry-run` is the full pre-merge c
 Render one Helmfile environment without deploying: `HELMFILE_ENV=<env> make template-helmfile`.
 
 Go functions: `make {test,build,lint}-lifecycle-function` (`functions/lifecycle-enforcer/`) and `make {test,build,lint}-oci-sweep-function` (`functions/oci-ci-sweep/`).
+
+CI tools image (`ci/tools/`): `make build-ci-tools` and `make test-ci-tools`. See `ci/tools/README.md`.
 
 ## Environments
 
@@ -83,7 +85,7 @@ For kind image builds, `PROJECTS_DIR` must be the parent directory of those repo
 
 ## CI
 
-There is no `.github/workflows/`. CI runs on **Prow** (OpenShift CI). Prow calls `ci-dry-run` (which runs `ci-validate`) and `ci-tf-env`, plus the desire delivery and Terraform targets directly. `ci-test` and `ci-cleanup` are the local equivalents of the Prow integration job. `OWNERS` enforces PR approval.
+There is no `.github/workflows/`. CI runs on **Prow** (OpenShift CI). Prow calls `ci-dry-run` (which runs `ci-validate`) and `ci-tf-env`, plus the desire delivery and Terraform targets directly. `ci/tools/` defines the build root image for the infra Prow jobs; the release `images` variant builds, tests and promotes it. `ci-test` and `ci-cleanup` are the local equivalents of the Prow integration job. `OWNERS` enforces PR approval.
 
 ## Common gotchas
 
@@ -101,6 +103,9 @@ With `EXT_AUTHZ_ENABLED=true`, the `hyperfleet-gateway` chart renders `Authorino
 
 **Terraform state locking is always disabled.**
 `install-terraform` and `destroy-terraform` pass `-lock=false`. If an apply left a `terraform/errored.tfstate`, resolve it before re-running.
+
+**The CI tools image installs Terraform providers only from its mirror.**
+`ci/tools/providers.tf` pins one version each of the Google, Google Beta, local and OCI providers, and `terraform init` in the image cannot download them. If you change a provider constraint in `terraform/` so that it excludes the mirrored version, validate fails at `terraform init`. Bump `ci/tools/providers.tf` to a version both constraints accept first. A new provider also goes in both lists in `ci/tools/terraformrc`.
 
 **`validate-terraform` uses no backend.**
 It runs `terraform init -backend=false`, so it validates syntax only, not GCS access or credentials.

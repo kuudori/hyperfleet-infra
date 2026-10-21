@@ -181,6 +181,8 @@ configurable in the chart values.
 | `make ci-test` | `install-terraform` + `get-credentials` + `install-priority-classes` + `install-desire-delivery` + `health-check-desire-delivery`. Run with `HELMFILE_ENV=e2e-gcp`: the default `gcp` needs Terraform-generated values |
 | `make ci-cleanup` | `uninstall-desire-delivery` + `destroy-terraform`. Run with `HELMFILE_ENV=e2e-gcp`, like `ci-test` |
 | `make ci-tf-env CI_ID=<id>` | Render `envs/gke/ci-<id>.tfvars` and `.tfbackend` for an ephemeral CI cluster from `ci.tfvars.template` and `ci.tfbackend.template` |
+| `make build-ci-tools` | Build the CI tools image (the Prow build root) from `ci/tools/` as `CI_TOOLS_IMAGE` (default `localhost/hyperfleet-infra-tools:dev`), with podman or docker (`CONTAINER_TOOL`) |
+| `make test-ci-tools` | `build-ci-tools`, then run `ci-dry-run` and a terraform init without network access in the image as an arbitrary UID. See [ci/tools/README.md](ci/tools/README.md) |
 
 ## Environment Variables
 
@@ -550,6 +552,7 @@ hyperfleet-infra/
 ├── scripts/                          # Helper scripts, most run through make targets
 ├── terraform/                        # GKE and shared VPC stacks, OCI CI stack in terraform/oci/ (see terraform/README.md)
 ├── functions/                        # Go cloud functions
+├── ci/tools/                         # Prow build root tools image (see ci/tools/README.md)
 ├── generated-values-from-terraform/  # Generated, gitignored
 └── generated-values-rabbitmq/        # Generated, gitignored
 ```
