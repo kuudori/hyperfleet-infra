@@ -219,8 +219,8 @@ wait_for_components() {
         -l app.kubernetes.io/name=hyperfleet-sentinel -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}') || return 1
     adapter_deployments=$(kubectl get deployments --namespace "$NAMESPACE" \
         -l app.kubernetes.io/name=hyperfleet-adapter -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}') || return 1
-    [[ -n "$sentinel_deployments" ]] || fail "no Sentinel deployments found in namespace $NAMESPACE"
-    [[ -n "$adapter_deployments" ]] || fail "no adapter deployments found in namespace $NAMESPACE"
+    [[ -n "$sentinel_deployments" ]] || { error "no Sentinel deployments found in namespace $NAMESPACE"; return 1; }
+    [[ -n "$adapter_deployments" ]] || { error "no adapter deployments found in namespace $NAMESPACE"; return 1; }
     for deployment in $sentinel_deployments $adapter_deployments; do
         wait_for_deployment "$deployment" || return 1
     done
@@ -467,6 +467,30 @@ restore_model() {
     switch_model onprem
 }
 
+# The AuthConfig Ready condition can still describe the previous policy right
+# after a switch, so poll until the gateway denies an on-prem token and
+# accepts an Oracle one.
+wait_for_oracle_policy() {
+    local onprem_subject="$1"
+    local onprem_tenant="$2"
+    local deadline=$((SECONDS + GATEWAY_E2E_TIMEOUT))
+    local onprem_token oracle_token response onprem_status="" oracle_status=""
+    while (( SECONDS < deadline )); do
+        onprem_token=$(TENANT_MODEL=onprem mint_human_token "$onprem_subject" "$onprem_tenant" "") || return 1
+        oracle_token=$(mint_human_token "hf-gateway-e2e-policy-${run_id}@example.com" "$tenant_a" "") || return 1
+        response=$(api_request GET "${api_path}/clusters" Bearer "$onprem_token") || return 1
+        onprem_status=$(response_status "$response")
+        response=$(api_request GET "${api_path}/clusters" Bearer "$oracle_token") || return 1
+        oracle_status=$(response_status "$response")
+        if [[ "$onprem_status" == "403" && "$oracle_status" == "200" ]]; then
+            return 0
+        fi
+        sleep "$GATEWAY_E2E_POLL_INTERVAL"
+    done
+    error "gateway did not enforce the Oracle model within ${GATEWAY_E2E_TIMEOUT}s (on-prem token HTTP ${onprem_status}, Oracle token HTTP ${oracle_status})"
+    return 1
+}
+
 on_exit() {
     local original_status="$1"
     local failed_model="$TENANT_MODEL"
@@ -707,6 +731,7 @@ run_full() {
     require_status "$response" 200 "on-prem token before Oracle switch"
     restore_onprem=true
     switch_model oracle
+    wait_for_oracle_policy "$onprem_subject" "$onprem_tenant"
     pass
 
     # A unique path lets the access log prove the gateway, not the API, denied
