@@ -273,30 +273,23 @@ flowchart LR
 #### Before you enable it
 
 Choose an OIDC issuer for human users and confirm that its tokens contain the
-claims required by your tenant model. The issuer mode is explicit and is
-reported by the install validation step:
+claims required by your tenant model. External mode is the default:
 
 | `HELMFILE_ENV` | Default `OIDC_ISSUER_MODE` | Mock human issuer used by API/gateway |
 | -------------- | -------------------------- | --------------------------- |
-| `kind` / `e2e-kind` | `mock` | Namespace-local `hyperfleet-mock-oidc` Service |
-| `e2e-gcp` | `mock` | Namespace-local `hyperfleet-mock-oidc` Service |
-| `gcp` | `external` | Terraform-generated or CLI-supplied HTTPS issuer |
+| All environments (`gcp`, `kind`, `e2e-gcp`, `e2e-kind`) | `external` | `OIDC_ISSUER_MODE=mock` enables namespace-local `hyperfleet-mock-oidc` Service |
 
-Mock mode is test-only. It uses the pinned `navikt/mock-oauth2-server` image,
+Mock mode is development-only, including in GCP. **Never use it in production.**
+It uses the pinned `navikt/mock-oauth2-server` image,
 keeps the TLS issuer behind a ClusterIP Service, allows ingress only from Authorino
 and the labeled token helper, and uses in-memory signing keys. A mock issuer
 restart invalidates previously minted tokens, so mint a fresh token after every
-rollout. Set `OIDC_ISSUER_MODE=external` to use a real issuer in any environment.
+rollout. Set `OIDC_ISSUER_MODE=mock` explicitly for test deployments.
 External mode requires a reachable `https://` `OIDC_ISSUER_URL` in `EDGE` or
 `EDGE+API` mode when human authentication is enabled. In mock mode,
 `OIDC_ISSUER_URL` must be unset because Helmfile derives the mock Service URL.
-Terraform-generated issuer values are loaded only for the
-regular `gcp` environment. Mock mode is allowed only in `kind`, `e2e-kind`, and
-`e2e-gcp`; use `e2e-gcp` for a GCP-backed test with the mock issuer.
-
-For the regular `gcp` environment, `make install-terraform` generates the
-cluster's external issuer configuration automatically. The mock is installed
-only when gateway auth uses mock mode, and it is ordered before the gateway.
+The mock is installed only when an authenticated deployment uses mock mode, and
+it is ordered before the gateway.
 Helmfile retains the disabled release in state so an `install-hyperfleet` mode
 change or `uninstall-hyperfleet` removes a previously installed mock issuer.
 
@@ -330,23 +323,27 @@ may be omitted.
 
 #### Deploy
 
-For GCP, first provision Terraform so the issuer URL is generated, then enable
-gateway authentication:
+For GCP, enable `use_pubsub` and configure `pubsub_topic_configs` in your
+Terraform variables before provisioning. See [Enable Pub/Sub](terraform/README.md#enable-pubsub).
+Without them, Terraform does not generate the broker values required by
+`HELMFILE_ENV=gcp`. Use an external issuer by default:
 
 ```bash
 make install-terraform
-AUTH_MODE=EDGE TENANT_ISOLATION_ENABLED=true make install-hyperfleet
+AUTH_MODE=EDGE TENANT_ISOLATION_ENABLED=true \
+  OIDC_ISSUER_URL=https://issuer.example.com \
+  make install-hyperfleet
 ```
 
-For kind and CI-shaped environments, the mock issuer is enabled without an
-issuer URL:
+For test environments, select the development-only mock issuer explicitly:
 
 ```bash
-HELMFILE_ENV=kind AUTH_MODE=EDGE TENANT_ISOLATION_ENABLED=true \
+HELMFILE_ENV=kind OIDC_ISSUER_MODE=mock \
+  AUTH_MODE=EDGE TENANT_ISOLATION_ENABLED=true \
   make install-hyperfleet
 
 HELMFILE_ENV=e2e-gcp NAMESPACE=<your-namespace> \
-  AUTH_MODE=EDGE TENANT_ISOLATION_ENABLED=true \
+  OIDC_ISSUER_MODE=mock AUTH_MODE=EDGE TENANT_ISOLATION_ENABLED=true \
   make install-hyperfleet
 ```
 
@@ -371,7 +368,7 @@ it while another HyperFleet namespace is using gateway authentication.
 | -------- | ------- | -------------- |
 | `AUTH_MODE` | `NONE` | One of `NONE`, `EDGE`, `API`, or `EDGE+API` |
 | `TENANT_ISOLATION_ENABLED` | `false` | Scope API data using trusted gateway headers; requires `AUTH_MODE=EDGE` or `EDGE+API` |
-| `OIDC_ISSUER_MODE` | `mock` except regular `gcp` (`external`) | Select `mock` or `external` for edge modes |
+| `OIDC_ISSUER_MODE` | `external` in all environments | Set `mock` explicitly for development or test deployments |
 | `OIDC_ISSUER_URL` | unset | HTTPS human issuer; API mode also requires `OIDC_JWKS_URL` |
 | `OIDC_JWKS_URL` | unset | Explicit human-provider JWKS URL for API mode |
 | `TENANT_MODEL` | `onprem` | Set to `oracle` when tokens use OCI tenancy claims |
@@ -385,6 +382,7 @@ requests work, add the external hostname, for example:
 
 ```bash
 AUTHORINO_HOSTS=api.example.com,api-alt.example.com \
+  OIDC_ISSUER_MODE=external \
   AUTH_MODE=EDGE \
   OIDC_ISSUER_URL=https://issuer.example.com \
   make install-hyperfleet
@@ -396,6 +394,7 @@ Reapply the deployment with the new model:
 
 ```bash
 AUTH_MODE=EDGE TENANT_ISOLATION_ENABLED=true \
+  OIDC_ISSUER_MODE=external \
   OIDC_ISSUER_URL=https://issuer.example.com \
   make switch-tenant-model TENANT_MODEL=oracle
 ```

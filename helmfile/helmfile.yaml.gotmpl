@@ -1,5 +1,21 @@
+{{- $globalAuthMode := env "AUTH_MODE" | default "NONE" -}}
+{{- $globalOIDCIssuerMode := env "OIDC_ISSUER_MODE" | default "external" -}}
 # Helmfile configuration
 # Documentation: https://helmfile.readthedocs.io/
+
+{{ if and (has $globalAuthMode (list "EDGE" "API" "EDGE+API")) (eq $globalOIDCIssuerMode "mock") }}
+hooks:
+  - events: ["prepare"]
+    showlogs: true
+    command: "sh"
+    args:
+      - "-c"
+      - |
+        printf '%s\n' '' \
+          'WARNING: DEVELOPMENT-ONLY mock OIDC issuer enabled' \
+          'Signing keys are ephemeral and in-memory; a mock issuer rollout invalidates previously minted tokens.' \
+          'Do not use mock OIDC for production.' ''
+{{ end }}
 
 # Common Helm defaults applied to all releases
 helmDefaults:
@@ -77,8 +93,8 @@ commonLabels:
 {{- if not (has $oidcIssuerMode (list "mock" "external")) }}
 {{ fail "OIDC_ISSUER_MODE must be mock or external" }}
 {{- end }}
-{{- if and $oidcAuth (eq $oidcIssuerMode "mock") (not (has .Environment.Name (list "kind" "e2e-kind" "e2e-gcp"))) }}
-{{ fail "OIDC_ISSUER_MODE=mock is test-only and allowed only in kind, e2e-kind, or e2e-gcp" }}
+{{- if and $oidcAuth (eq $oidcIssuerMode "mock") (not (has .Environment.Name (list "gcp" "kind" "e2e-kind" "e2e-gcp"))) }}
+{{ fail "OIDC_ISSUER_MODE=mock is test-only and allowed only in gcp, kind, e2e-kind, or e2e-gcp" }}
 {{- end }}
 {{- if and $oidcAuth (eq $oidcIssuerMode "mock") (env "OIDC_ISSUER_URL") }}
 {{ fail "OIDC_ISSUER_URL must be empty with OIDC_ISSUER_MODE=mock in authenticated modes" }}
@@ -132,7 +148,7 @@ releases:
       component: rabbitmq
 {{ end }}
 
-  # Test-only human issuer. Keep the release in Helmfile state when disabled so
+  # Development-only human issuer. Keep the release in Helmfile state when disabled so
   # an auth-mode change or teardown removes a previously deployed mock.
   - name: hyperfleet-mock-oidc
     namespace: {{ .Values.namespace }}
