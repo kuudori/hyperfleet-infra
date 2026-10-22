@@ -68,8 +68,6 @@ TOKEN_TENANT ?=
 TOKEN_SUBTENANT ?=
 TOKEN_MISSING_REQUIRED ?= false
 CURL_IMAGE ?= curlimages/curl:8.22.0@sha256:58adaa4e8dca9c988bae2aba4ab3434a0bb2da16bbe3f92dec39ec7785166777
-GATEWAY_E2E_TIMEOUT ?= 300
-GATEWAY_E2E_POLL_INTERVAL ?= 5
 
 # Machine-token helper defaults. E2E environments deploy cl-desire instead of
 # adapter1; override MACHINE_SERVICE_ACCOUNT to exercise a different allowed

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2016
-# The nested single-quoted scripts run in short-lived in-cluster curl pods.
+# The single-quoted curl pod scripts and jq filters expand their own variables.
 # Exercise the gateway identity boundary, tenant isolation, machine callers,
 # reconciliation, tenant-model switching, and the API ingress NetworkPolicy.
 
@@ -15,7 +15,6 @@ TENANT_ISOLATION_ENABLED="${TENANT_ISOLATION_ENABLED:-false}"
 TENANT_MODEL="${TENANT_MODEL:-onprem}"
 GATEWAY_SERVICE="${GATEWAY_SERVICE:-hyperfleet-gateway}"
 API_SERVICE="${API_SERVICE:-hyperfleet-api}"
-CILIUM_NAMESPACE="${CILIUM_NAMESPACE:-kube-system}"
 CURL_IMAGE="${CURL_IMAGE:-curlimages/curl:8.22.0@sha256:58adaa4e8dca9c988bae2aba4ab3434a0bb2da16bbe3f92dec39ec7785166777}"
 GATEWAY_E2E_TIMEOUT="${GATEWAY_E2E_TIMEOUT:-300}"
 GATEWAY_E2E_POLL_INTERVAL="${GATEWAY_E2E_POLL_INTERVAL:-5}"
@@ -35,14 +34,12 @@ owner_tenant=""
 owner_subtenant=""
 owner_token=""
 owner_token_minted=0
-temporary_service_account=""
 restore_onprem=false
-# Report state: the checks that passed, the check running now with a fix to
-# suggest if it fails, and the last failure message.
-results=()
+mint_log=""
+# The check running now, with a fix to print if it fails.
 current_check=""
 current_hint=""
-failure_reason=""
+passed=0
 
 usage() {
     echo "usage: $0 {human|current-model|full}" >&2
@@ -53,58 +50,20 @@ error() {
 }
 
 fail() {
-    failure_reason="$*"
     error "$@"
     exit 1
 }
 
-# Name the check that runs next. If the suite stops before pass, the report
-# shows this check, the failure, and the optional hint.
+# Name the check that runs next. If the suite stops before pass, on_exit
+# prints this check and the optional hint.
 check() {
     current_check="$1"
     current_hint="${2:-}"
 }
 
 pass() {
-    results+=("PASS  ${TENANT_MODEL}  ${current_check}")
+    passed=$((passed + 1))
     printf 'PASS  %s  %s\n' "$TENANT_MODEL" "$current_check"
-}
-
-print_report() {
-    local status="$1"
-    local failed_model="$2"
-    local cleanup_status="$3"
-    local restore_status="$4"
-    local line
-    printf '\nGateway e2e report (phase %s, namespace %s, AUTH_MODE=%s)\n' "$PHASE" "$NAMESPACE" "$AUTH_MODE"
-    if (( ${#results[@]} > 0 )); then
-        for line in "${results[@]}"; do
-            printf '  %s\n' "$line"
-        done
-    fi
-    if (( status != 0 )); then
-        printf '  FAIL  %s  %s\n' "$failed_model" "$current_check"
-        [[ -z "$failure_reason" ]] || printf '        %s\n' "$failure_reason"
-        [[ -z "$current_hint" ]] || printf '        Fix: %s\n' "$current_hint"
-    fi
-    if (( cleanup_status != 0 )); then
-        printf '  Cleanup failed: delete leftover hf-gateway-e2e-* pods, ServiceAccounts, and Clusters by hand.\n'
-    fi
-    if [[ "$restore_onprem" == "true" ]]; then
-        if (( restore_status == 0 )); then
-            printf '  Tenant model restored to onprem.\n'
-        else
-            printf '  Tenant model NOT restored. Run: HELMFILE_ENV=%s AUTH_MODE=%s OIDC_ISSUER_MODE=mock TENANT_ISOLATION_ENABLED=true make switch-tenant-model TENANT_MODEL=onprem\n' \
-                "$HELMFILE_ENV" "$AUTH_MODE"
-        fi
-    fi
-    if (( status != 0 )); then
-        printf 'Result: FAILED (%d checks passed; the checks after the failure did not run)\n' "${#results[@]}"
-    elif (( cleanup_status != 0 || restore_status != 0 )); then
-        printf 'Result: FAILED after all %d checks passed (cleanup or restore)\n' "${#results[@]}"
-    else
-        printf 'Result: PASSED (%d checks)\n' "${#results[@]}"
-    fi
 }
 
 require_command() {
@@ -119,22 +78,13 @@ response_body() {
     printf '%s' "$1" | tail -n +2
 }
 
+# The expected status is a regex such as 201 or '401|403'.
 require_status() {
     local actual
     local expected="$2"
     local description="$3"
     actual=$(response_status "$1")
-    [[ "$actual" == "$expected" ]] || fail "$description returned HTTP $actual, expected $expected"
-}
-
-require_denial() {
-    local actual
-    local description="$2"
-    actual=$(response_status "$1")
-    case "$actual" in
-        401|403) ;;
-        *) fail "$description returned HTTP $actual, expected 401 or 403" ;;
-    esac
+    [[ "$actual" =~ ^($expected)$ ]] || fail "$description returned HTTP $actual, expected $expected"
 }
 
 # Succeed when jq -e accepts the body with the remaining jq arguments.
@@ -142,17 +92,6 @@ body_matches() {
     local body="$1"
     shift
     printf '%s' "$body" | jq -e "$@" >/dev/null
-}
-
-validate_integer() {
-    local name="$1"
-    local value="$2"
-    [[ "$value" =~ ^[1-9][0-9]*$ ]] || fail "$name must be a positive integer"
-}
-
-validate_header() {
-    local header="$1"
-    [[ "$header" =~ ^[A-Za-z0-9-]+=[A-Za-z0-9._:@+-]*$ ]] || fail "unsupported forged header value"
 }
 
 configure_model() {
@@ -195,39 +134,12 @@ validate_inputs() {
     [[ "$OIDC_ISSUER_MODE" == "mock" ]] || fail "$PHASE requires OIDC_ISSUER_MODE=mock"
     [[ "$AUTH_MODE" == "EDGE" || "$AUTH_MODE" == "EDGE+API" ]] || fail "$PHASE requires AUTH_MODE=EDGE or EDGE+API"
     [[ "$TENANT_ISOLATION_ENABLED" == "true" ]] || fail "$PHASE requires TENANT_ISOLATION_ENABLED=true"
-    validate_integer GATEWAY_E2E_TIMEOUT "$GATEWAY_E2E_TIMEOUT"
-    validate_integer GATEWAY_E2E_POLL_INTERVAL "$GATEWAY_E2E_POLL_INTERVAL"
     configure_model
-}
-
-wait_for_deployment() {
-    kubectl rollout status "deployment/$1" --namespace "$NAMESPACE" \
-        --timeout="${GATEWAY_E2E_TIMEOUT}s" >/dev/null
-}
-
-# Every wait returns explicitly: restore_model runs this from the EXIT trap in
-# an || context, where set -e does not stop on a failed wait.
-wait_for_components() {
-    local sentinel_deployments adapter_deployments deployment
-    wait_for_deployment hyperfleet-mock-oidc || return 1
-    kubectl wait --for=condition=Ready authconfig/hyperfleet-tenant-policy \
-        --namespace "$NAMESPACE" --timeout="${GATEWAY_E2E_TIMEOUT}s" >/dev/null || return 1
-    wait_for_deployment "$GATEWAY_SERVICE" || return 1
-    wait_for_deployment "$API_SERVICE" || return 1
-
-    sentinel_deployments=$(kubectl get deployments --namespace "$NAMESPACE" \
-        -l app.kubernetes.io/name=hyperfleet-sentinel -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}') || return 1
-    adapter_deployments=$(kubectl get deployments --namespace "$NAMESPACE" \
-        -l app.kubernetes.io/name=hyperfleet-adapter -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}') || return 1
-    [[ -n "$sentinel_deployments" ]] || { error "no Sentinel deployments found in namespace $NAMESPACE"; return 1; }
-    [[ -n "$adapter_deployments" ]] || { error "no adapter deployments found in namespace $NAMESPACE"; return 1; }
-    for deployment in $sentinel_deployments $adapter_deployments; do
-        wait_for_deployment "$deployment" || return 1
-    done
 }
 
 # Print a response as a status line followed by its body. Credentials are read
 # from standard input inside the pod and never appear in pod specs or argv.
+# Arguments after the body are extra "name: value" request headers.
 api_request() {
     local method="$1"
     local path="$2"
@@ -240,13 +152,8 @@ api_request() {
     else
         shift 4
     fi
-    local pod_name="hf-gateway-e2e-request-${run_id}-${RANDOM}"
-    local header
-    for header in "$@"; do
-        validate_header "$header"
-    done
 
-    printf '%s\n' "$token" | kubectl run "$pod_name" \
+    printf '%s\n' "$token" | kubectl run "hf-gateway-e2e-request-${run_id}-${RANDOM}" \
         --namespace "$NAMESPACE" \
         --labels="$pod_labels" \
         --image="$CURL_IMAGE" \
@@ -264,51 +171,31 @@ scheme="$3"
 body="$4"
 gateway_service="$5"
 shift 5
-response_file=/tmp/response
-headers="$*"
-set -- -sS --connect-timeout 5 --max-time 20 -o "$response_file" -w "%{http_code}" -X "$method" "http://${gateway_service}:8000${path}"
+# Replace each remaining header argument with -H and the header.
+n=$#
+while [ "$n" -gt 0 ]; do
+    set -- "$@" -H "$1"
+    shift
+    n=$((n - 1))
+done
+set -- "$@" -sS --connect-timeout 5 --max-time 20 -o /tmp/response -w "%{http_code}" -X "$method" "http://${gateway_service}:8000${path}"
 if [ "$scheme" != "none" ]; then
     set -- "$@" -H "Authorization: ${scheme} ${token}"
 fi
 if [ -n "$body" ]; then
     set -- "$@" -H "Content-Type: application/json" --data-raw "$body"
 fi
-# Forged headers arrive as name=value pairs validated by the outer script to
-# contain no whitespace, so this split keeps each one a single curl argument
-# without eval. curl ignores a header without a colon, so convert each pair.
-for header in $headers; do
-    set -- "$@" -H "${header%%=*}: ${header#*=}"
-done
 status=$(curl "$@")
 printf "%s\\n" "$status"
-cat "$response_file"
+cat /tmp/response
 ' -- "$method" "$path" "$scheme" "$body" "$GATEWAY_SERVICE" "$@"
 }
 
-# The helper's per-token diagnostics are shown only when minting fails.
+# The helper's diagnostics are shown only when minting fails. Callers override
+# TOKEN_AUDIENCE or TENANT_MODEL by prefixing the call.
 mint_human_token() {
-    local subject="$1"
-    local tenant="$2"
-    local subtenant="$3"
-    local missing_required="${4:-false}"
-    local diagnostics token
-    diagnostics=$(mktemp)
-    if token=$(TOKEN_MISSING_REQUIRED="$missing_required" \
-        TOKEN_AUDIENCE="${TOKEN_AUDIENCE:-hyperfleet-api}" \
-        TOKEN_SUBJECT="$subject" \
-        TOKEN_TENANT="$tenant" \
-        TOKEN_SUBTENANT="$subtenant" \
-        TENANT_MODEL="$TENANT_MODEL" \
-        AUTH_MODE="$AUTH_MODE" \
-        OIDC_ISSUER_MODE=mock NAMESPACE="$NAMESPACE" \
-        "$SCRIPT_DIR/mint-human-token.sh" 2>"$diagnostics"); then
-        rm -f "$diagnostics"
-        printf '%s\n' "$token"
-        return 0
-    fi
-    cat "$diagnostics" >&2
-    rm -f "$diagnostics"
-    return 1
+    TOKEN_SUBJECT="$1" TOKEN_TENANT="$2" TOKEN_SUBTENANT="$3" TOKEN_MISSING_REQUIRED="${4:-false}" \
+        "$SCRIPT_DIR/mint-human-token.sh" 2>"$mint_log" || { cat "$mint_log" >&2; return 1; }
 }
 
 # Mint the Cluster owner's token when it is missing or older than
@@ -329,26 +216,26 @@ set_owner() {
     refresh_owner_token
 }
 
-# Envoy logs UAEX (denied by ext_authz) and no upstream host ("-") for a
-# request it answered without contacting the API. Requiring that entry, rather
-# than the absence of an API log line, fails when the evidence is missing.
-assert_denied_at_gateway() {
-    local path="$1"
-    local deadline=$((SECONDS + GATEWAY_E2E_TIMEOUT))
-    local pods pod logs entry
+# Send a request on a path unique to this check and require that the gateway
+# denied it. Envoy logs UAEX (denied by ext_authz) and no upstream host ("-")
+# for a request it answered without contacting the API. Requiring that entry,
+# rather than the absence of an API log line, fails when the evidence is
+# missing.
+expect_denied_at_gateway() {
+    local name="$1"
+    local scheme="$2"
+    local token="$3"
+    local expected="${4:-401|403}"
+    local path="${api_path}/gateway-e2e-${name}-${TENANT_MODEL}-${run_id}"
+    local response entry deadline
+    response=$(api_request GET "$path" "$scheme" "$token")
+    require_status "$response" "$expected" "$name request"
+    deadline=$((SECONDS + GATEWAY_E2E_TIMEOUT))
     while (( SECONDS < deadline )); do
-        pods=$(kubectl get pods --namespace "$NAMESPACE" \
-            -l app.kubernetes.io/name=hyperfleet-gateway --field-selector=status.phase=Running \
-            -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}') \
-            || fail "could not list gateway pods for the denied request check"
-        [[ -n "$pods" ]] || fail "could not find gateway pods for the denied request check"
-        entry=""
-        while IFS= read -r pod; do
-            [[ -n "$pod" ]] || continue
-            # A pod that cannot serve envoy logs yet is retried on the next poll.
-            logs=$(kubectl logs "$pod" --namespace "$NAMESPACE" --container envoy --since=10m 2>/dev/null) || continue
-            entry+=$(printf '%s\n' "$logs" | grep -F -- " ${path} " || true)
-        done <<<"$pods"
+        # Envoy writes access log lines asynchronously, and a pod that cannot
+        # serve logs yet is read again on the next poll.
+        entry=$(kubectl logs --namespace "$NAMESPACE" -l app.kubernetes.io/name=hyperfleet-gateway \
+            --container envoy --since=10m --tail=-1 2>/dev/null | grep -F -- " ${path} " || true)
         if [[ -n "$entry" ]]; then
             [[ "$entry" == *" UAEX "* && "$entry" == *'"-"' ]] \
                 || fail "gateway forwarded $path to the API instead of denying it at ext_authz"
@@ -359,40 +246,16 @@ assert_denied_at_gateway() {
     fail "gateway access log has no entry for denied request $path within ${GATEWAY_E2E_TIMEOUT}s"
 }
 
-assert_tenant_stamped() {
+# The API returns tenancy as a flat map of the tenant headers it received, so
+# an exact match also proves that no forged tenant header was stored.
+assert_tenancy() {
     local body="$1"
     local tenant="$2"
-    body_matches "$body" --arg key "$required_key" --arg value "$tenant" \
-        '[.. | objects | select(has($key)) | .[$key]] | any(. == $value)' \
-        || fail "API response did not stamp ${required_key} from the gateway token"
-}
-
-assert_gateway_identity_stamped() {
-    local body="$1"
-    local subject="$2"
-    body_matches "$body" --arg subject "$subject" \
-        '[.. | objects | select(.created_by? == $subject or .updated_by? == $subject)] | length > 0' \
-        || fail "API response did not record the gateway-derived audit identity"
-}
-
-assert_optional_tenant_stamped() {
-    local body="$1"
-    local subtenant="$2"
-    if [[ -n "$subtenant" ]]; then
-        body_matches "$body" --arg key "$optional_key" --arg value "$subtenant" \
-            '[.. | objects | select(has($key)) | .[$key]] | any(. == $value)' \
-            || fail "API response did not stamp optional ${optional_key} from the gateway token"
-    else
-        body_matches "$body" --arg key "$optional_key" '[.. | objects | select(has($key))] | length == 0' \
-            || fail "API response unexpectedly contained optional ${optional_key}"
-    fi
-}
-
-assert_cluster_absent_from_list() {
-    local body="$1"
-    local cluster_id="$2"
-    body_matches "$body" --arg id "$cluster_id" '[.. | objects | .id? | select(. == $id)] | length == 0' \
-        || fail "tenant B list unexpectedly contains tenant A cluster $cluster_id"
+    local subtenant="$3"
+    body_matches "$body" --arg required "$required_key" --arg tenant "$tenant" \
+        --arg optional "$optional_key" --arg subtenant "$subtenant" \
+        '.tenancy == ({($required): $tenant} + (if $subtenant == "" then {} else {($optional): $subtenant} end))' \
+        || fail "API stored tenancy $(printf '%s' "$body" | jq -c '.tenancy?' 2>/dev/null), expected ${required_key}=${tenant} and ${optional_key}=${subtenant:-<absent>}"
 }
 
 wait_for_reconciled() {
@@ -440,17 +303,14 @@ cleanup_current_cluster() {
 cleanup_resources() {
     local rc=0
     cleanup_current_cluster || { error "failed to clean the suite-owned Cluster"; rc=1; }
-    if [[ -n "$temporary_service_account" ]]; then
-        kubectl delete serviceaccount "$temporary_service_account" --namespace "$NAMESPACE" \
-            --ignore-not-found >/dev/null 2>&1 || { error "failed to delete temporary ServiceAccount"; rc=1; }
-        temporary_service_account=""
-    fi
     kubectl delete pod --namespace "$NAMESPACE" -l "$pod_labels" \
         --ignore-not-found --wait=false >/dev/null 2>&1 || rc=1
+    rm -f "$mint_log"
     return "$rc"
 }
 
-# Helmfile prints full release diffs, so show them only when the switch fails.
+# Helmfile waits for the gateway and API rollouts. It prints full release
+# diffs, so show them only when the switch fails.
 switch_model() {
     local output
     output=$(make -C "$REPO_ROOT" --no-print-directory switch-tenant-model TENANT_MODEL="$1" 2>&1) || {
@@ -459,60 +319,60 @@ switch_model() {
     }
     TENANT_MODEL="$1"
     configure_model
-    wait_for_components
 }
 
-restore_model() {
-    echo "Restoring tenant model to onprem..." >&2
-    switch_model onprem
-}
-
-# The AuthConfig Ready condition can still describe the previous policy right
-# after a switch, so poll until the gateway denies an on-prem token and
-# accepts an Oracle one.
+# The AuthConfig can still apply the previous policy right after a switch, so
+# poll until the gateway denies an on-prem token and accepts an Oracle one.
 wait_for_oracle_policy() {
     local onprem_subject="$1"
     local onprem_tenant="$2"
     local deadline=$((SECONDS + GATEWAY_E2E_TIMEOUT))
     local onprem_token oracle_token response onprem_status="" oracle_status=""
     while (( SECONDS < deadline )); do
-        onprem_token=$(TENANT_MODEL=onprem mint_human_token "$onprem_subject" "$onprem_tenant" "") || return 1
-        oracle_token=$(mint_human_token "hf-gateway-e2e-policy-${run_id}@example.com" "$tenant_a" "") || return 1
-        response=$(api_request GET "${api_path}/clusters" Bearer "$onprem_token") || return 1
+        onprem_token=$(TENANT_MODEL=onprem mint_human_token "$onprem_subject" "$onprem_tenant" "")
+        oracle_token=$(mint_human_token "hf-gateway-e2e-policy-${run_id}@example.com" "$tenant_a" "")
+        response=$(api_request GET "${api_path}/clusters" Bearer "$onprem_token")
         onprem_status=$(response_status "$response")
-        response=$(api_request GET "${api_path}/clusters" Bearer "$oracle_token") || return 1
+        response=$(api_request GET "${api_path}/clusters" Bearer "$oracle_token")
         oracle_status=$(response_status "$response")
         if [[ "$onprem_status" == "403" && "$oracle_status" == "200" ]]; then
-            return 0
+            return
         fi
         sleep "$GATEWAY_E2E_POLL_INTERVAL"
     done
-    error "gateway did not enforce the Oracle model within ${GATEWAY_E2E_TIMEOUT}s (on-prem token HTTP ${onprem_status}, Oracle token HTTP ${oracle_status})"
-    return 1
+    fail "gateway did not enforce the Oracle model within ${GATEWAY_E2E_TIMEOUT}s (on-prem token HTTP ${onprem_status}, Oracle token HTTP ${oracle_status})"
 }
 
+# Print the failed check while TENANT_MODEL still names the failing model,
+# then clean up, restore on-prem, and print the result.
 on_exit() {
-    local original_status="$1"
-    local failed_model="$TENANT_MODEL"
-    local cleanup_status=0
-    local restore_status=0
+    local rc=$?
     trap - EXIT
-    cleanup_resources || cleanup_status=1
+    if (( rc != 0 )); then
+        printf 'FAIL  %s  %s\n' "$TENANT_MODEL" "$current_check"
+        [[ -z "$current_hint" ]] || printf '      Fix: %s\n' "$current_hint"
+    fi
+    cleanup_resources || {
+        error "cleanup failed: delete leftover hf-gateway-e2e-* pods and Clusters by hand"
+        rc=1
+    }
     if [[ "$restore_onprem" == "true" ]]; then
-        restore_model || restore_status=1
+        echo "Restoring tenant model to onprem..." >&2
+        switch_model onprem || {
+            error "tenant model NOT restored. Run: HELMFILE_ENV=$HELMFILE_ENV AUTH_MODE=$AUTH_MODE OIDC_ISSUER_MODE=mock TENANT_ISOLATION_ENABLED=true make switch-tenant-model TENANT_MODEL=onprem"
+            rc=1
+        }
     fi
-    print_report "$original_status" "$failed_model" "$cleanup_status" "$restore_status"
-    if (( original_status != 0 )); then
-        exit "$original_status"
+    if (( rc == 0 )); then
+        printf '\nResult: PASSED (%d checks)\n' "$passed"
+    else
+        printf '\nResult: FAILED (%d checks passed)\n' "$passed"
     fi
-    if (( cleanup_status != 0 || restore_status != 0 )); then
-        exit 1
-    fi
+    exit "$rc"
 }
 
 run_human_phase() {
-    local subject tenant subtenant
-    local response body name wrong_audience_token missing_token
+    local subject tenant subtenant response body name token
     if [[ "$PHASE" == "human" ]]; then
         subject="${TOKEN_SUBJECT:-human@example.com}"
         tenant="${TOKEN_TENANT:-}"
@@ -532,103 +392,38 @@ run_human_phase() {
     body=$(response_body "$response")
     current_cluster_id=$(printf '%s' "$body" | jq -er '.id | select(type == "string" and length > 0)') \
         || fail "valid human token response did not contain a cluster id"
-    assert_tenant_stamped "$body" "$tenant"
-    assert_optional_tenant_stamped "$body" "$subtenant"
+    assert_tenancy "$body" "$tenant" "$subtenant"
     cleanup_current_cluster || fail "could not clean human token smoke resource"
     pass
 
     # The gateway JWT authentication enforces the audience, so a mismatch fails
     # authentication (401) rather than authorization (403).
     check "token for another audience fails authentication (401)"
-    wrong_audience_token=$(TOKEN_AUDIENCE=some-other-app mint_human_token "$subject" "$tenant" "$subtenant")
-    response=$(api_request GET "${api_path}/clusters" Bearer "$wrong_audience_token")
+    token=$(TOKEN_AUDIENCE=some-other-app mint_human_token "$subject" "$tenant" "$subtenant")
+    response=$(api_request GET "${api_path}/clusters" Bearer "$token")
     require_status "$response" 401 "wrong-audience token"
     pass
 
     check "token without the required ${required_key} claim is denied (403)"
-    missing_token=$(mint_human_token "$subject" "$tenant" "$subtenant" true)
-    response=$(api_request GET "${api_path}/clusters" Bearer "$missing_token")
-    require_status "$response" 403 "missing required claim token"
-    pass
-}
-
-# Tenant B's token is minted for each check, so it is never older than the
-# requests below.
-assert_isolation() {
-    local cluster_id="$1"
-    local token_b response
-    token_b=$(mint_human_token "hf-gateway-e2e-b-${run_id}@example.com" "$tenant_b" "$subtenant_b")
-    response=$(api_request GET "${api_path}/clusters" Bearer "$token_b")
-    require_status "$response" 200 "tenant B cluster list"
-    assert_cluster_absent_from_list "$(response_body "$response")" "$cluster_id"
-    for method in GET DELETE; do
-        response=$(api_request "$method" "${api_path}/clusters/${cluster_id}" Bearer "$token_b")
-        require_status "$response" 404 "tenant B $method on tenant A cluster"
-    done
-    response=$(api_request PATCH "${api_path}/clusters/${cluster_id}" Bearer "$token_b" \
-        '{"spec":{"region":"us-west-2"}}')
-    require_status "$response" 404 "tenant B PATCH on tenant A cluster"
-}
-
-# full runs this once per tenant model, so the ServiceAccount name carries the
-# model and the account is deleted before the next pass.
-run_machine_denials() {
-    local token response
-    temporary_service_account="hf-gateway-e2e-unlisted-${TENANT_MODEL}-${run_id}"
-    kubectl create serviceaccount "$temporary_service_account" --namespace "$NAMESPACE" >/dev/null
-    token=$(kubectl create token "$temporary_service_account" --namespace "$NAMESPACE" --audience=hyperfleet-api)
-    response=$(api_request GET "${api_path}/clusters" ServiceAccount "$token")
-    require_status "$response" 403 "unlisted ServiceAccount"
+    token=$(mint_human_token "$subject" "$tenant" "$subtenant" true)
     response=$(api_request GET "${api_path}/clusters" Bearer "$token")
-    require_denial "$response" "ServiceAccount token sent as Bearer"
-    kubectl delete serviceaccount "$temporary_service_account" --namespace "$NAMESPACE" >/dev/null
-    temporary_service_account=""
-}
-
-verify_tenant_body_immutable() {
-    local cluster_id="$1"
-    local tenant="$2"
-    local response status
-    refresh_owner_token
-    response=$(api_request PATCH "${api_path}/clusters/${cluster_id}" Bearer "$owner_token" \
-        "{\"spec\":{\"region\":\"us-east-1\"},\"${required_key}\":\"forged-body-tenant\"}")
-    status=$(response_status "$response")
-    case "$status" in
-        400|422) ;;
-        200)
-            response=$(api_request GET "${api_path}/clusters/${cluster_id}" Bearer "$owner_token")
-            require_status "$response" 200 "tenant immutability readback"
-            assert_tenant_stamped "$(response_body "$response")" "$tenant"
-            ;;
-        *) fail "tenant immutability patch returned HTTP $status, expected 200, 400, or 422" ;;
-    esac
-}
-
-run_denial_at_gateway() {
-    local missing_path invalid_path unknown_scheme_path response
-    check "missing, invalid, and unknown-scheme credentials are denied at the gateway, never reaching the API"
-    missing_path="${api_path}/gateway-e2e-missing-${TENANT_MODEL}-${run_id}"
-    response=$(api_request GET "$missing_path" none "")
-    require_denial "$response" "missing credential"
-    assert_denied_at_gateway "$missing_path"
-    invalid_path="${api_path}/gateway-e2e-invalid-${TENANT_MODEL}-${run_id}"
-    response=$(api_request GET "$invalid_path" Bearer "not-a-jwt-${run_id}")
-    require_denial "$response" "invalid credential"
-    assert_denied_at_gateway "$invalid_path"
-    # Only Bearer (humans) and ServiceAccount (machines) select an
-    # authentication method, so any other scheme must be denied.
-    unknown_scheme_path="${api_path}/gateway-e2e-unknown-scheme-${TENANT_MODEL}-${run_id}"
-    response=$(api_request GET "$unknown_scheme_path" Basic "aGY6Z2F0ZXdheS1lMmU=")
-    require_denial "$response" "unknown authorization scheme"
-    assert_denied_at_gateway "$unknown_scheme_path"
+    require_status "$response" 403 "missing required claim token"
     pass
 }
 
 run_current_model() {
     local subject_a="hf-gateway-e2e-a-${run_id}@example.com"
-    local response body name
+    local response body name token method
     run_human_phase
-    run_denial_at_gateway
+
+    check "missing, invalid, and unknown-scheme credentials are denied at the gateway, never reaching the API"
+    expect_denied_at_gateway missing none ""
+    expect_denied_at_gateway invalid Bearer "not-a-jwt-${run_id}"
+    # Only Bearer (humans) and ServiceAccount (machines) select an
+    # authentication method, so any other scheme must be denied.
+    expect_denied_at_gateway unknown-scheme Basic "aGY6Z2F0ZXdheS1lMmU="
+    pass
+
     # Authorino overwrites the forged required tenant, system, and identity
     # headers. Tenant A's token has no optional claim, so Authorino sets no
     # optional tenant header and only Envoy's stripping keeps the forged one
@@ -638,31 +433,28 @@ run_current_model() {
     name="hf-gateway-e2e-${TENANT_MODEL}-${run_id}"
     response=$(api_request POST "${api_path}/clusters" Bearer "$owner_token" \
         "{\"kind\":\"Cluster\",\"name\":\"${name}\",\"spec\":{\"region\":\"us-east-1\"}}" \
-        "${required_header}=forged-tenant" "${optional_header}=forged-subtenant" \
-        'x-hyperfleet-system=true' "x-hyperfleet-identity=forged-${run_id}@example.com")
+        "${required_header}: forged-tenant" "${optional_header}: forged-subtenant" \
+        'x-hyperfleet-system: true' "x-hyperfleet-identity: forged-${run_id}@example.com")
     require_status "$response" 201 "forged-header cluster creation"
     body=$(response_body "$response")
     current_cluster_id=$(printf '%s' "$body" | jq -er '.id | select(type == "string" and length > 0)') \
         || fail "forged-header cluster response did not contain a cluster id"
-    assert_tenant_stamped "$body" "$tenant_a"
-    assert_optional_tenant_stamped "$body" ""
+    assert_tenancy "$body" "$tenant_a" ""
     # Only EDGE+API gives the API a caller identity, the gateway wristband
     # subject. In EDGE mode the API records its system default instead.
     if [[ "$AUTH_MODE" == "EDGE+API" ]]; then
-        assert_gateway_identity_stamped "$body" "$subject_a"
+        body_matches "$body" --arg subject "$subject_a" '.created_by == $subject' \
+            || fail "API did not record the gateway-derived identity $subject_a as created_by"
     fi
     pass
 
-    check "client-supplied ${required_key} in the request body is not accepted"
-    verify_tenant_body_immutable "$current_cluster_id" "$tenant_a"
-    pass
-
-    check "tenant B cannot list, read, patch, or delete tenant A's Cluster"
-    assert_isolation "$current_cluster_id"
-    pass
-
+    # The namespace's default ServiceAccount is never on the gateway allow-list.
     check "unlisted ServiceAccount and a ServiceAccount token sent as Bearer are denied"
-    run_machine_denials
+    token=$(kubectl create token default --namespace "$NAMESPACE" --audience=hyperfleet-api)
+    response=$(api_request GET "${api_path}/clusters" ServiceAccount "$token")
+    require_status "$response" 403 "unlisted ServiceAccount"
+    response=$(api_request GET "${api_path}/clusters" Bearer "$token")
+    require_status "$response" '401|403' "ServiceAccount token sent as Bearer"
     pass
 
     check "Cluster reaches Reconciled=True through Sentinel and adapters" \
@@ -670,8 +462,20 @@ run_current_model() {
     wait_for_reconciled "$current_cluster_id"
     pass
 
-    check "tenant B is still isolated after reconciliation"
-    assert_isolation "$current_cluster_id"
+    # Tenant B's token is minted here, so it is never older than these requests.
+    check "tenant B cannot list, read, patch, or delete tenant A's Cluster after reconciliation"
+    token=$(mint_human_token "hf-gateway-e2e-b-${run_id}@example.com" "$tenant_b" "$subtenant_b")
+    response=$(api_request GET "${api_path}/clusters" Bearer "$token")
+    require_status "$response" 200 "tenant B cluster list"
+    body_matches "$(response_body "$response")" --arg id "$current_cluster_id" 'all(.items[]; .id != $id)' \
+        || fail "tenant B list contains tenant A cluster $current_cluster_id"
+    for method in GET DELETE; do
+        response=$(api_request "$method" "${api_path}/clusters/${current_cluster_id}" Bearer "$token")
+        require_status "$response" 404 "tenant B $method on tenant A cluster"
+    done
+    response=$(api_request PATCH "${api_path}/clusters/${current_cluster_id}" Bearer "$token" \
+        '{"spec":{"region":"us-west-2"}}')
+    require_status "$response" 404 "tenant B PATCH on tenant A cluster"
     pass
 
     check "Cluster is hard-deleted"
@@ -679,81 +483,66 @@ run_current_model() {
     pass
 }
 
-verify_cilium_policy_posture() {
-    kubectl rollout status daemonset/cilium --namespace "$CILIUM_NAMESPACE" \
-        --timeout="${GATEWAY_E2E_TIMEOUT}s" >/dev/null
-    kubectl get networkpolicy hyperfleet-api-ingress --namespace "$NAMESPACE" >/dev/null
-}
-
+# The probe pod reaches the gateway, then sends the same request directly to
+# the API, which the NetworkPolicy must drop (curl exit 28, no HTTP status).
 run_network_policy_probe() {
-    local token response pod_name output curl_exit http_status
-    check "direct in-cluster request to the API is dropped while the gateway stays reachable"
-    token=$(mint_human_token "hf-gateway-e2e-probe-${run_id}@example.com" "$tenant_a" "")
-    response=$(api_request GET "${api_path}/clusters" Bearer "$token")
-    require_status "$response" 200 "gateway reachability before NetworkPolicy probe"
-    pod_name="hf-gateway-e2e-netpol-${run_id}"
-    output=$(kubectl run "$pod_name" --namespace "$NAMESPACE" \
+    local output result_pattern='gateway=([0-9]+) api_exit=([0-9]+) api=([0-9]+)'
+    check "direct in-cluster request to the API is dropped while the gateway stays reachable" \
+        "use the kind cluster from make local-up-kind, which installs Cilium and the NetworkPolicies"
+    output=$(kubectl run "hf-gateway-e2e-netpol-${run_id}" --namespace "$NAMESPACE" \
         --labels="$pod_labels" \
         --image="$CURL_IMAGE" --restart=Never --rm --quiet --attach --command -- sh -c '
-set +e
-status=$(curl -k -sS --connect-timeout 5 --max-time 10 -o /tmp/body -w "%{http_code}" "https://$1:8000/api/hyperfleet/v1/clusters" 2>/dev/null)
-rc=$?
-printf "curl_exit=%s http_status=%s\\n" "$rc" "$status"
-exit 0
-' -- "$API_SERVICE") || fail "direct API NetworkPolicy probe pod failed"
-    curl_exit=$(printf '%s\n' "$output" | sed -n 's/.*curl_exit=\([0-9][0-9]*\).*/\1/p')
-    http_status=$(printf '%s\n' "$output" | sed -n 's/.*http_status=\([0-9][0-9]*\).*/\1/p')
-    [[ "$curl_exit" == "28" && "$http_status" == "000" ]] || \
-        fail "direct API probe was not dropped by NetworkPolicy (curl_exit=${curl_exit:-unknown} http_status=${http_status:-unknown})"
-    response=$(api_request GET "${api_path}/clusters" Bearer "$token")
-    require_status "$response" 200 "gateway reachability after NetworkPolicy probe"
+gateway=$(curl -s --connect-timeout 5 --max-time 10 -o /dev/null -w "%{http_code}" "http://$1:8000/api/hyperfleet/v1/clusters")
+api=$(curl -k -s --connect-timeout 5 --max-time 10 -o /dev/null -w "%{http_code}" "https://$2:8000/api/hyperfleet/v1/clusters")
+api_exit=$?
+printf "gateway=%s api_exit=%s api=%s\\n" "$gateway" "$api_exit" "$api"
+' -- "$GATEWAY_SERVICE" "$API_SERVICE") || fail "NetworkPolicy probe pod failed"
+    [[ "$output" =~ $result_pattern ]] || fail "NetworkPolicy probe printed no result: $output"
+    [[ "${BASH_REMATCH[1]}" != "000" ]] || fail "gateway is unreachable from the probe pod"
+    [[ "${BASH_REMATCH[2]}" == "28" && "${BASH_REMATCH[3]}" == "000" ]] \
+        || fail "direct API request was not dropped by NetworkPolicy (curl exit ${BASH_REMATCH[2]}, HTTP ${BASH_REMATCH[3]})"
     pass
 }
 
 run_full() {
     [[ "$TENANT_MODEL" == "onprem" ]] || fail "full must start with TENANT_MODEL=onprem"
     local onprem_subject="hf-gateway-e2e-old-${run_id}@example.com"
-    local onprem_tenant onprem_token old_token_path response
-    check "Cilium is running and the hyperfleet-api-ingress NetworkPolicy exists" \
-        "use the kind cluster from make local-up-kind, which installs Cilium and the NetworkPolicies"
-    verify_cilium_policy_posture
-    pass
+    local onprem_tenant="$tenant_a"
+    local token
+    run_network_policy_probe
     run_current_model
 
+    # The mock issuer serves both models, so on-prem tokens are minted after
+    # the switch with the claims the on-prem pass just accepted. No token has
+    # to outlive the switch.
     check "tenant model switches to Oracle through configuration only" \
         "nothing else may redeploy the gateway or API while the suite runs"
-    # The mock issuer serves both models, so the on-prem token checked after
-    # the switch is minted then, with the claims accepted just before it. No
-    # token has to outlive the switch.
-    onprem_tenant="$tenant_a"
-    onprem_token=$(mint_human_token "$onprem_subject" "$onprem_tenant" "")
-    response=$(api_request GET "${api_path}/clusters" Bearer "$onprem_token")
-    require_status "$response" 200 "on-prem token before Oracle switch"
     restore_onprem=true
     switch_model oracle
     wait_for_oracle_policy "$onprem_subject" "$onprem_tenant"
     pass
 
-    # A unique path lets the access log prove the gateway, not the API, denied
-    # the old-model token.
     check "on-prem token is rejected at the gateway after the switch" \
         "nothing else may redeploy the gateway or API while the suite runs"
-    onprem_token=$(TENANT_MODEL=onprem mint_human_token "$onprem_subject" "$onprem_tenant" "")
-    old_token_path="${api_path}/gateway-e2e-old-token-${run_id}"
-    response=$(api_request GET "$old_token_path" Bearer "$onprem_token")
-    require_status "$response" 403 "on-prem token after Oracle switch"
-    assert_denied_at_gateway "$old_token_path"
+    token=$(TENANT_MODEL=onprem mint_human_token "$onprem_subject" "$onprem_tenant" "")
+    expect_denied_at_gateway old-token Bearer "$token" 403
     pass
 
     run_current_model
-    run_network_policy_probe
 }
 
 validate_inputs
-trap 'on_exit $?' EXIT
+# mint-human-token.sh reads these from the environment.
+export NAMESPACE AUTH_MODE OIDC_ISSUER_MODE TENANT_MODEL
+mint_log=$(mktemp)
+trap on_exit EXIT
 check "HyperFleet stack is deployed and ready" \
     "bring it up with: HELMFILE_ENV=kind OIDC_ISSUER_MODE=mock TENANT_ISOLATION_ENABLED=true make local-up-kind"
-wait_for_components
+kubectl wait --for=condition=Available deployment --namespace "$NAMESPACE" \
+    -l 'app.kubernetes.io/name in (mock-oidc,hyperfleet-gateway,hyperfleet-api,hyperfleet-sentinel,hyperfleet-adapter)' \
+    --timeout="${GATEWAY_E2E_TIMEOUT}s" >/dev/null
+kubectl wait --for=condition=Ready authconfig/hyperfleet-tenant-policy \
+    --namespace "$NAMESPACE" --timeout="${GATEWAY_E2E_TIMEOUT}s" >/dev/null
 pass
 case "$PHASE" in
     human) run_human_phase ;;

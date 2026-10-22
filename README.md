@@ -498,12 +498,8 @@ token for a ServiceAccount not included in the Helmfile-derived allow-list.
 
 #### Gateway end-to-end suite
 
-`make check-gateway-e2e` is the canonical local regression suite for the
-gateway boundary. It requires an already-installed **kind** deployment with
-Cilium enforcement, mock OIDC, `AUTH_MODE=EDGE` or `EDGE+API` (the default),
-and tenant isolation enabled. It starts from the on-prem tenant model, runs the
-same matrix after switching to Oracle, and restores on-prem automatically even
-when an assertion fails.
+`make check-gateway-e2e` is the local regression suite for the gateway
+boundary. It needs a kind deployment with mock OIDC and tenant isolation:
 
 ```bash
 HELMFILE_ENV=kind OIDC_ISSUER_MODE=mock TENANT_ISOLATION_ENABLED=true \
@@ -512,34 +508,14 @@ HELMFILE_ENV=kind OIDC_ISSUER_MODE=mock TENANT_ISOLATION_ENABLED=true \
 make check-gateway-e2e
 ```
 
-`check-gateway-e2e` defaults to `HELMFILE_ENV=kind`, `OIDC_ISSUER_MODE=mock`,
-and `TENANT_ISOLATION_ENABLED=true`; values you pass still win. Do not
-redeploy the gateway or API while it runs. It prints a `PASS` line per check
-and ends with a report that names the failing check, its error, a suggested
-fix where one applies, and whether cleanup and model restoration succeeded.
+The target defaults to those three values, and values you pass still win. The
+suite runs every check on the on-prem tenant model, switches to Oracle, runs
+them again, and restores on-prem even when a check fails. Do not redeploy the
+gateway or API while it runs. It prints a `PASS` line per check, and on failure
+the failing check with a suggested fix.
 
-A passing run proves that a request with forged tenant, system, and identity
-headers is served with gateway-derived values, and that a forged optional
-tenant header, which only Envoy's stripping removes, never reaches the stored
-tenancy (with `EDGE+API` the API also records the wristband subject as the
-audit identity); that Envoy denies missing and invalid credentials, and
-schemes other than `Bearer` and `ServiceAccount`, at ext_authz without an
-upstream request; that unlisted ServiceAccounts and a ServiceAccount
-token sent as `Bearer` are denied; that tenant isolation holds before and after
-a real Sentinel/adapter `Reconciled=True` lifecycle and hard deletion; that
-on-prem tokens are rejected after the switch to Oracle; and that a direct
-connection to the API is dropped while the gateway stays reachable. Temporary
-`hf-gateway-e2e-*` pods, ServiceAccounts, and API resources are removed.
-
-For focused runs, `make check-human-token` runs the human identity checks. Run
-directly with the same variables in its environment,
-`scripts/check-gateway-e2e.sh current-model` runs the per-model matrix without
-switching configuration, and `full` adds the model switch and the NetworkPolicy
-probe. `GATEWAY_E2E_TIMEOUT`, `GATEWAY_E2E_POLL_INTERVAL`, `GATEWAY_SERVICE`,
-`API_SERVICE`, and `CURL_IMAGE` tune the environment. Tokens never appear in
-arguments, object fields, or output. Mock tokens expire after 10 minutes, so
-the suite mints each token for the step that uses it and re-mints the Cluster
-owner's token once it is 5 minutes old.
+`make check-human-token` runs only the human token checks.
+`GATEWAY_E2E_TIMEOUT` (default 300 seconds) bounds each wait.
 
 ### Desire delivery
 
