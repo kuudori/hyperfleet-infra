@@ -51,15 +51,17 @@ auth:
 
   machineIdentity:
     audience: {{ .Values.machineIdentityAudience | quote }}
-    # Exact SA allow-list, derived from the sentinels/adapters actually declared for
-    # this environment (environments/<env>/{sentinel,adapter}-configs.yaml.gotmpl) so
-    # it can't drift from the releases deployed. See helm/hyperfleet-gateway/values.yaml.
+    # Exact SA allow-list, derived from declared sentinels/adapters and any
+    # environment-specific machine callers. See helm/hyperfleet-gateway/values.yaml.
     allowedServiceAccounts:
       {{- range .Values.sentinels }}
       - {{ printf "%s-hyperfleet-sentinel" .name | quote }}
       {{- end }}
       {{- range .Values.adapters }}
       - {{ printf "%s-hyperfleet-adapter" .name | quote }}
+      {{- end }}
+      {{- range .Values.additionalMachineServiceAccounts }}
+      - {{ . | quote }}
       {{- end }}
 
   authorino:

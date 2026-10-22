@@ -1,0 +1,7 @@
+{{- $runnerServiceAccount := "hyperfleet-e2e-runner" -}}
+additionalMachineServiceAccounts:
+  - "adapter-clusters-cl-stuck"
+  - "adapter-clusters-cl-param-error"
+  - "adapter-clusters-cl-crash"
+  - "adapter-clusters-cl-invalid-resource"
+  - {{ $runnerServiceAccount | quote }}

@@ -68,7 +68,7 @@ Every environment delivers through API → Sentinel → remote adapter → Redis
 
 ## Helm charts
 
-Local charts in `helm/`: `external-dns`, `hyperfleet-gateway`, `mock-oidc`, `namespace-cleaner`, `network-policies`, `rabbitmq`, `redis`. `rabbitmq` and `redis` are dev-only (no persistence, no auth or `guest/guest`) and not production-ready.
+Local charts in `helm/`: `external-dns`, `hyperfleet-e2e`, `hyperfleet-gateway`, `mock-oidc`, `namespace-cleaner`, `network-policies`, `rabbitmq`, `redis`. `hyperfleet-e2e` is installed only in e2e Helmfile environments. `rabbitmq` and `redis` are dev-only (no persistence, no auth or `guest/guest`) and not production-ready.
 
 Required non-standard plugins (`check-helm` and `check-helmfile` verify them):
 
@@ -98,7 +98,7 @@ For other environments it silently does nothing.
 **The Authorino operator is a cluster-singleton prerequisite for gateway ext_authz.**
 With `EXT_AUTHZ_ENABLED=true`, the `hyperfleet-gateway` chart renders `Authorino` and `AuthConfig` CRs. `install-hyperfleet` installs the pinned operator (`AUTHORINO_OPERATOR_VERSION`) first through `maybe-install-authorino-operator`. If you apply the CRs before the operator exists, Helmfile fails on unknown CRDs.
 
-**OIDC defaults to an external issuer in every environment.** Set `OIDC_ISSUER_URL` for authenticated external deployments. Set `OIDC_ISSUER_MODE=mock` explicitly in `gcp`, `kind`, `e2e-gcp`, or `e2e-kind` only. Authenticated mock deployments emit a Helmfile warning; its in-memory signing keys are replaced on issuer rollout, invalidating minted tokens. **Never use mock mode in production.** Direct human OIDC with `AUTH_MODE=API` also needs `OIDC_JWKS_URL`.
+**OIDC defaults to mock in E2E environments.** `e2e-gcp` and `e2e-kind` use the namespace-local mock issuer; `gcp` and `kind` default to an external issuer. Set `OIDC_ISSUER_URL` for authenticated external deployments. Set `OIDC_ISSUER_MODE` explicitly to override an environment default. Authenticated mock deployments emit a Helmfile warning; its in-memory signing keys are replaced on issuer rollout, invalidating minted tokens. **Never use mock mode in production.** Direct human OIDC with `AUTH_MODE=API` also needs `OIDC_JWKS_URL`.
 
 **Terraform state locking is always disabled.**
 `install-terraform` and `destroy-terraform` pass `-lock=false`. If an apply left a `terraform/errored.tfstate`, resolve it before re-running.

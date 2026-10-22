@@ -1,0 +1,6 @@
+apiVersion: v2
+name: hyperfleet-e2e
+description: E2E runner identity resources for HyperFleet test environments
+type: application
+version: 0.1.0
+appVersion: "1.0"

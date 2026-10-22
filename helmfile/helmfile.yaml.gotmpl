@@ -34,6 +34,7 @@ values:
   - apiAudience: hyperfleet-api
   # TokenReview audience shared by gateway AuthConfig and adapter/sentinel clients.
   - machineIdentityAudience: hyperfleet-api
+  - additionalMachineServiceAccounts: []
   # The desire store: the redis release's Service and port in this namespace.
   # Remote adapters write to it and the applier reads it, so both always use
   # the same store.
@@ -56,6 +57,7 @@ environments:
         brokerType: googlepubsub
         gatewayServiceType: {{ env "GATEWAY_SERVICE_TYPE" | default "LoadBalancer" }}
         runId: {{ env "RUN_ID" | quote }}
+      - environments/e2e-authentication.yaml.gotmpl
       - environments/e2e-gcp/adapter-configs.yaml.gotmpl
       - environments/e2e-gcp/sentinel-configs.yaml
   e2e-kind:
@@ -63,6 +65,7 @@ environments:
       - brokerType: rabbitmq
         gatewayServiceType: {{ env "GATEWAY_SERVICE_TYPE" | default "ClusterIP" }}
         runId: {{ env "RUN_ID" | quote }}
+      - environments/e2e-authentication.yaml.gotmpl
       - environments/e2e-kind/adapter-configs.yaml.gotmpl
       - environments/e2e-kind/sentinel-configs.yaml
   kind:
@@ -88,6 +91,7 @@ commonLabels:
 {{ fail "AUTH_MODE must be NONE, EDGE, API, or EDGE+API" }}
 {{ end }}
 {{- $edgeAuth := has .Values.authMode (list "EDGE" "EDGE+API") -}}
+{{- $e2eEnvironment := has .Environment.Name (list "e2e-kind" "e2e-gcp") -}}
 {{- $oidcAuth := has .Values.authMode (list "EDGE" "API" "EDGE+API") -}}
 {{- $oidcIssuerMode := env "OIDC_ISSUER_MODE" | default "external" -}}
 {{- if not (has $oidcIssuerMode (list "mock" "external")) }}
@@ -208,12 +212,28 @@ releases:
     values:
       - values/base-api.yaml.gotmpl
 
+  - name: hyperfleet-e2e
+    namespace: {{ .Values.namespace }}
+    chart: ../helm/hyperfleet-e2e
+    installed: {{ $e2eEnvironment }}
+    labels:
+      component: e2e
+    values:
+      - serviceAccount:
+          create: {{ $e2eEnvironment }}
+          name: "hyperfleet-e2e-runner"
+
   - name: hyperfleet-gateway
     namespace: {{ .Values.namespace }}
     chart: ../helm/hyperfleet-gateway
-{{ if and $edgeAuth (eq $oidcIssuerMode "mock") }}
+{{ if or $e2eEnvironment (and $edgeAuth (eq $oidcIssuerMode "mock")) }}
     needs:
+{{- if $e2eEnvironment }}
+      - hyperfleet-e2e
+{{- end }}
+{{- if and $edgeAuth (eq $oidcIssuerMode "mock") }}
       - hyperfleet-mock-oidc
+{{ end }}
 {{ end }}
     labels:
       component: gateway

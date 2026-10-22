@@ -88,6 +88,7 @@ Configuration precedence (highest to lowest):
 | Target | Description |
 | -------- | ------------- |
 | `make install-hyperfleet` | Install all HyperFleet components |
+| `make install-gateway` | Install or update HyperFleet gateway, Authorino, and AuthConfig only |
 | `make install-api` | Install HyperFleet API only |
 | `make install-sentinels` | Install Sentinels only |
 | `make install-adapters` | Install Adapters only |
@@ -273,18 +274,19 @@ flowchart LR
 #### Before you enable it
 
 Choose an OIDC issuer for human users and confirm that its tokens contain the
-claims required by your tenant model. External mode is the default:
+claims required by your tenant model. E2E environments default to the namespace-local mock issuer; other environments default to an external issuer:
 
 | `HELMFILE_ENV` | Default `OIDC_ISSUER_MODE` | Mock human issuer used by API/gateway |
 | -------------- | -------------------------- | --------------------------- |
-| All environments (`gcp`, `kind`, `e2e-gcp`, `e2e-kind`) | `external` | `OIDC_ISSUER_MODE=mock` enables namespace-local `hyperfleet-mock-oidc` Service |
+| `e2e-gcp`, `e2e-kind` | `mock` | Namespace-local `hyperfleet-mock-oidc` Service |
+| `gcp`, `kind` | `external` | Set `OIDC_ISSUER_MODE=mock` explicitly to use the namespace-local `hyperfleet-mock-oidc` Service |
 
 Mock mode is development-only, including in GCP. **Never use it in production.**
 It uses the pinned `navikt/mock-oauth2-server` image,
 keeps the TLS issuer behind a ClusterIP Service, allows ingress only from Authorino
 and the labeled token helper, and uses in-memory signing keys. A mock issuer
 restart invalidates previously minted tokens, so mint a fresh token after every
-rollout. Set `OIDC_ISSUER_MODE=mock` explicitly for test deployments.
+rollout. E2E environments select mock mode by default; set it explicitly for other test deployments.
 External mode requires a reachable `https://` `OIDC_ISSUER_URL` in `EDGE` or
 `EDGE+API` mode when human authentication is enabled. In mock mode,
 `OIDC_ISSUER_URL` must be unset because Helmfile derives the mock Service URL.
@@ -295,8 +297,10 @@ change or `uninstall-hyperfleet` removes a previously installed mock issuer.
 
 You do not need to configure credentials manually for adapters and sentinels
 deployed by this Helmfile. Their authentication is enabled automatically and
-their ServiceAccounts are added to the allow-list. The e2e environments also
-include the ServiceAccounts created by the e2e test suite.
+their ServiceAccounts are added to the allow-list. In e2e environments, Helmfile
+installs the `hyperfleet-e2e` support chart, which owns `hyperfleet-e2e-runner`.
+The E2E process requests a machine token for that ServiceAccount. Temporary
+adapters and runner identity are added through e2e-only Helmfile values.
 
 The distinct authorization schemes select mutually exclusive Authorino
 authentication methods: `ServiceAccount` invokes Kubernetes TokenReview, while
@@ -335,7 +339,7 @@ AUTH_MODE=EDGE TENANT_ISOLATION_ENABLED=true \
   make install-hyperfleet
 ```
 
-For test environments, select the development-only mock issuer explicitly:
+For a local Kind test deployment, select the development-only mock issuer explicitly:
 
 ```bash
 HELMFILE_ENV=kind OIDC_ISSUER_MODE=mock \
@@ -343,7 +347,7 @@ HELMFILE_ENV=kind OIDC_ISSUER_MODE=mock \
   make install-hyperfleet
 
 HELMFILE_ENV=e2e-gcp NAMESPACE=<your-namespace> \
-  OIDC_ISSUER_MODE=mock AUTH_MODE=EDGE TENANT_ISOLATION_ENABLED=true \
+  AUTH_MODE=EDGE TENANT_ISOLATION_ENABLED=true \
   make install-hyperfleet
 ```
 
@@ -366,9 +370,9 @@ it while another HyperFleet namespace is using gateway authentication.
 
 | Variable | Default | When to set it |
 | -------- | ------- | -------------- |
-| `AUTH_MODE` | `NONE` | One of `NONE`, `EDGE`, `API`, or `EDGE+API` |
+| `AUTH_MODE` | `EDGE+API` | One of `NONE`, `EDGE`, `API`, or `EDGE+API` |
 | `TENANT_ISOLATION_ENABLED` | `false` | Scope API data using trusted gateway headers; requires `AUTH_MODE=EDGE` or `EDGE+API` |
-| `OIDC_ISSUER_MODE` | `external` in all environments | Set `mock` explicitly for development or test deployments |
+| `OIDC_ISSUER_MODE` | `mock` in `e2e-gcp` and `e2e-kind`; `external` otherwise | Set explicitly to override the environment default |
 | `OIDC_ISSUER_URL` | unset | HTTPS human issuer; API mode also requires `OIDC_JWKS_URL` |
 | `OIDC_JWKS_URL` | unset | Explicit human-provider JWKS URL for API mode |
 | `TENANT_MODEL` | `onprem` | Set to `oracle` when tokens use OCI tenancy claims |
@@ -546,7 +550,7 @@ hyperfleet-infra/
 ├── Makefile                          # Entry point: run 'make help'
 ├── env.gcp, env.kind                 # Variable defaults (GCP: Pub/Sub, LoadBalancer; kind: RabbitMQ, ClusterIP)
 ├── helmfile/                         # Helmfile state: per-env adapter and sentinel lists, adapter configs, value templates
-├── helm/                             # Local charts (gateway, Redis, RabbitMQ, mock OIDC, network policies, ...)
+├── helm/                             # Local charts (gateway, E2E support, Redis, RabbitMQ, mock OIDC, ...)
 ├── manifests/                        # Plain Kubernetes manifests (priority classes, ...)
 ├── scripts/                          # Helper scripts, most run through make targets
 ├── terraform/                        # GKE and shared VPC stacks, OCI CI stack in terraform/oci/ (see terraform/README.md)

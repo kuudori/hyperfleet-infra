@@ -12,7 +12,14 @@ else
 	-include env.gcp
 endif
 
+# E2E environments use the namespace-local mock issuer. All development and
+# production-like environments require an explicit external issuer by default.
+E2E_MOCK_OIDC_ENVIRONMENTS := e2e-kind e2e-gcp
+ifneq ($(filter $(HELMFILE_ENV),$(E2E_MOCK_OIDC_ENVIRONMENTS)),)
+OIDC_ISSUER_MODE ?= mock
+else
 OIDC_ISSUER_MODE ?= external
+endif
 
 export
 GIT_SHA ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
@@ -29,7 +36,7 @@ AUTO_APPROVE_FLAG := $(if $(filter $(TRUTHY_VALUES),$(strip $(AUTO_APPROVE))),-a
 BUILD_IMAGES_ENABLED := $(if $(filter $(TRUTHY_VALUES),$(strip $(BUILD_IMAGES))),1,)
 
 # Authentication has one public control.
-AUTH_MODE ?= NONE
+AUTH_MODE ?= EDGE+API
 EDGE_AUTH_ENABLED := $(if $(filter EDGE EDGE+API,$(strip $(AUTH_MODE))),1,)
 
 
@@ -331,6 +338,10 @@ install-repos: check-helmfile-env ## Add all hyperfleet helm repos
 install-hyperfleet: validate-helmfile-config check-hyperfleet-namespace maybe-install-authorino-operator install-cert-manager ensure-kubernetes-oidc-discovery ## Install all HyperFleet components with mandatory request-path TLS
 	helmfile -f helmfile/helmfile.yaml.gotmpl -e $(HELMFILE_ENV) apply
 
+.PHONY: install-gateway
+install-gateway: validate-helmfile-config check-hyperfleet-namespace maybe-install-authorino-operator install-cert-manager ensure-kubernetes-oidc-discovery ## Install or update HyperFleet gateway, Authorino, and AuthConfig only
+	helmfile -f helmfile/helmfile.yaml.gotmpl -e $(HELMFILE_ENV) -l component=gateway apply --include-needs
+
 .PHONY: switch-tenant-model
 switch-tenant-model: validate-helmfile-config maybe-install-authorino-operator ## Switch the active tenant model; requires AUTH_MODE=EDGE or EDGE+API
 	@if [ -z "$(EDGE_AUTH_ENABLED)" ]; then \
@@ -346,9 +357,8 @@ switch-tenant-model: validate-helmfile-config maybe-install-authorino-operator #
 	@echo "OK: tenant model switched to '$(TENANT_MODEL)' (same AuthConfig name replaces the policy; old-model tokens are rejected at the gateway)"
 
 .PHONY: install-api
-install-api: validate-helmfile-config check-hyperfleet-namespace install-cert-manager maybe-install-authorino-operator ensure-kubernetes-oidc-discovery ## Install gateway PKI prerequisite and HyperFleet API
-	helmfile apply -f helmfile/helmfile.yaml.gotmpl -e $(HELMFILE_ENV) -l component=gateway
-	helmfile apply -f helmfile/helmfile.yaml.gotmpl -e $(HELMFILE_ENV) -l component=api
+install-api: install-gateway ## Install HyperFleet API with its gateway prerequisite
+	helmfile -f helmfile/helmfile.yaml.gotmpl -e $(HELMFILE_ENV) -l component=api apply
 
 .PHONY: install-sentinels
 install-sentinels: validate-helmfile-config ## Install Hyperfleet Sentinels
@@ -802,13 +812,13 @@ validate-desire-delivery: check-helm ## Validate the desire delivery render (rem
 			$$0 == "  name: " name { keep = 1 } \
 			END { if (keep) printf "%s", doc }'; \
 	}; \
-	NAMESPACE=hf-validate RUN_ID=hf-validate helmfile -f helmfile/helmfile.yaml.gotmpl -e e2e-kind repos >/dev/null \
+	NAMESPACE=hf-validate RUN_ID=hf-validate OIDC_ISSUER_MODE=mock OIDC_ISSUER_URL= OIDC_JWKS_URL= helmfile -f helmfile/helmfile.yaml.gotmpl -e e2e-kind repos >/dev/null \
 		|| { echo "ERROR: Helmfile desire delivery repository setup failed"; exit 1; }; \
 	for env in e2e-kind e2e-gcp kind gcp; do \
 		ns=hf-validate-$$env; \
 		mode=mock; url=; \
 		if [ "$$env" = gcp ]; then mode=external; url=https://issuer.invalid; fi; \
-		export NAMESPACE=$$ns RUN_ID=$$ns OIDC_ISSUER_MODE=$$mode OIDC_ISSUER_URL=$$url; \
+		export NAMESPACE=$$ns RUN_ID=$$ns OIDC_ISSUER_MODE=$$mode OIDC_ISSUER_URL=$$url OIDC_JWKS_URL=; \
 		out=$$(helmfile -f helmfile/helmfile.yaml.gotmpl -e $$env $$selectors template --skip-deps) \
 			|| { echo "ERROR: Helmfile desire delivery template failed for $$env"; exit 1; }; \
 		adapters=$$(echo "$$out" | sed -n 's/^  name: \(.*\)-hyperfleet-adapter-config$$/\1/p'); \
