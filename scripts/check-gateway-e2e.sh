@@ -322,21 +322,26 @@ switch_model() {
 }
 
 # The AuthConfig can still apply the previous policy right after a switch, so
-# poll until the gateway denies an on-prem token and accepts an Oracle one.
+# poll until the gateway denies an on-prem token and accepts an Oracle one. A
+# mint or request can fail while old gateway pods drain, so a failure counts
+# as an unsuccessful attempt.
 wait_for_oracle_policy() {
     local onprem_subject="$1"
     local onprem_tenant="$2"
     local deadline=$((SECONDS + GATEWAY_E2E_TIMEOUT))
-    local onprem_token oracle_token response onprem_status="" oracle_status=""
+    local onprem_token oracle_token onprem_response oracle_response onprem_status oracle_status
     while (( SECONDS < deadline )); do
-        onprem_token=$(TENANT_MODEL=onprem mint_human_token "$onprem_subject" "$onprem_tenant" "")
-        oracle_token=$(mint_human_token "hf-gateway-e2e-policy-${run_id}@example.com" "$tenant_a" "")
-        response=$(api_request GET "${api_path}/clusters" Bearer "$onprem_token")
-        onprem_status=$(response_status "$response")
-        response=$(api_request GET "${api_path}/clusters" Bearer "$oracle_token")
-        oracle_status=$(response_status "$response")
-        if [[ "$onprem_status" == "403" && "$oracle_status" == "200" ]]; then
-            return
+        onprem_status="error"
+        oracle_status="error"
+        if onprem_token=$(TENANT_MODEL=onprem mint_human_token "$onprem_subject" "$onprem_tenant" "") \
+            && oracle_token=$(mint_human_token "hf-gateway-e2e-policy-${run_id}@example.com" "$tenant_a" "") \
+            && onprem_response=$(api_request GET "${api_path}/clusters" Bearer "$onprem_token") \
+            && oracle_response=$(api_request GET "${api_path}/clusters" Bearer "$oracle_token"); then
+            onprem_status=$(response_status "$onprem_response")
+            oracle_status=$(response_status "$oracle_response")
+            if [[ "$onprem_status" == "403" && "$oracle_status" == "200" ]]; then
+                return
+            fi
         fi
         sleep "$GATEWAY_E2E_POLL_INTERVAL"
     done
