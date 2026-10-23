@@ -1,6 +1,14 @@
 
 .DEFAULT_GOAL := help
 
+# check-gateway-e2e only runs against a kind deployment with mock OIDC and
+# tenant isolation, so it defaults to that setup instead of gcp.
+ifeq ($(MAKECMDGOALS),check-gateway-e2e)
+HELMFILE_ENV ?= kind
+OIDC_ISSUER_MODE ?= mock
+TENANT_ISOLATION_ENABLED ?= true
+endif
+
 # Possible envs are gcp, e2e-gcp, kind, e2e-kind
 # Default to gcp
 HELMFILE_ENV ?= gcp
@@ -305,7 +313,11 @@ mint-machine-token: ## Mint a projected ServiceAccount JWT for API or gateway au
 
 .PHONY: check-human-token
 check-human-token: check-kubectl-context check-jq ## Check mock human JWT tenant propagation and denial cases
-	@./scripts/check-human-token.sh
+	@./scripts/check-gateway-e2e.sh human
+
+.PHONY: check-gateway-e2e
+check-gateway-e2e: check-kubectl-context check-jq ## Run the full kind gateway identity, lifecycle, tenant-isolation, and NetworkPolicy suite
+	@./scripts/check-gateway-e2e.sh full
 
 # ==== RabbitMQ Components ====
 .PHONY: generate-rabbitmq-values
@@ -685,7 +697,7 @@ help: ## Show this help message
 		sub(/ ====$$/,"", section); \
 		next; \
 	} \
-	/^[a-zA-Z_-]+:.*?## / { \
+	/^[a-zA-Z0-9_-]+:.*?## / { \
 		if (section) { \
 			if (!(section in seen)) { \
 				if (count > 0) print ""; \

@@ -109,6 +109,7 @@ Configuration precedence (highest to lowest):
 | `make mint-human-token` | Mint a test-only JWT from the mock issuer (API, EDGE, or EDGE+API) |
 | `make mint-machine-token` | Mint a short-lived ServiceAccount JWT for API or gateway authentication |
 | `make check-human-token` | Verify human JWT tenant propagation, audience enforcement, and missing-claim denial |
+| `make check-gateway-e2e` | Run the full kind gateway identity, lifecycle, tenant-isolation, and NetworkPolicy suite |
 
 When `AUTH_MODE=EDGE` or `AUTH_MODE=EDGE+API`, `make install-hyperfleet` installs the Authorino
 operator automatically before deploying, so `install-authorino-operator` only
@@ -406,7 +407,7 @@ AUTH_MODE=EDGE TENANT_ISOLATION_ENABLED=true \
 After the switch, human tokens must contain the new model's required claim.
 All human tokens must also include `hyperfleet-api` in the JWT `aud` claim.
 
-#### Mock human tokens and smoke check
+#### Mock human tokens and gateway checks
 
 The mock issuer exposes a documented Make interface for later gateway suites
 and for manual checks. The helper prints only the raw JWT to stdout and sends
@@ -450,8 +451,8 @@ HELMFILE_ENV=kind OIDC_ISSUER_MODE=mock \
 
 Run the narrow propagation check after installing with tenant isolation. It
 creates and cleans up one temporary Cluster, verifies the selected tenancy
-values in the API response, and confirms that tokens with the wrong audience or
-without the required claim receive HTTP 403. For `kind` and `e2e-kind`, both
+values in the API response, and confirms that a token with the wrong audience
+receives HTTP 401 and a token without the required claim receives HTTP 403. For `kind` and `e2e-kind`, both
 token helpers verify that the active kubectl context is a kind context before
 they mutate the cluster:
 
@@ -494,6 +495,27 @@ curl -i -H "Authorization: ServiceAccount $token" \
 The `ServiceAccount` authorization scheme is intentional: it selects
 Authorino's Kubernetes TokenReview path. To verify a rejection case, request a
 token for a ServiceAccount not included in the Helmfile-derived allow-list.
+
+#### Gateway end-to-end suite
+
+`make check-gateway-e2e` is the local regression suite for the gateway
+boundary. It needs a kind deployment with mock OIDC and tenant isolation:
+
+```bash
+HELMFILE_ENV=kind OIDC_ISSUER_MODE=mock TENANT_ISOLATION_ENABLED=true \
+  make local-up-kind
+
+make check-gateway-e2e
+```
+
+The target defaults to those three values, and values you pass still win. The
+suite runs every check on the on-prem tenant model, switches to Oracle, runs
+them again, and restores on-prem even when a check fails. Do not redeploy the
+gateway or API while it runs. It prints a `PASS` line per check, and on failure
+the failing check with a suggested fix.
+
+`make check-human-token` runs only the human token checks.
+`GATEWAY_E2E_TIMEOUT` (default 300 seconds) bounds each wait.
 
 ### Desire delivery
 
