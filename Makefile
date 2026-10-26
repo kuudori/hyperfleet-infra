@@ -716,7 +716,7 @@ help: ## Show this help message
 
 # ==== CI Targets ====
 # ci-dry-run: validate terraform, lint charts and scripts, and check chart and
-#   Helmfile renders (network policies, namespace cleaner, desire delivery)
+#   Helmfile renders (network policies, namespace cleaner, desire delivery, fixture entities)
 # ci-test: install terraform, then deploy and health check the desire delivery
 #   stack (Redis desire store + hyperfleet-applier)
 # ci-cleanup: uninstall the desire delivery stack and destroy terraform resources
@@ -809,12 +809,9 @@ validate-desire-delivery: check-helm ## Validate the desire delivery render (rem
 	@set -eu; \
 	generated=$$(mktemp -d); \
 	trap 'rm -rf "$$generated"' EXIT; \
-	mkdir "$$generated/rabbitmq" "$$generated/terraform"; \
-	scripts/generate-rabbitmq-values.sh --out-dir "$$generated/rabbitmq" --namespace hf-validate-kind \
-		--rabbitmq-url amqp://guest:guest@rabbitmq:5672 >/dev/null; \
-	for name in adapter1 adapter2 adapter3 sentinel-clusters sentinel-nodepools; do \
-		printf '%s\n' 'broker: {}' > "$$generated/terraform/$$name.yaml"; \
-	done; \
+	namespace_prefix=hf-validate; \
+	scripts/prepare-helmfile-render-inputs.sh --generated-dir "$$generated" \
+		--rabbitmq-namespace "$$namespace_prefix-kind"; \
 	export GENERATED_RABBITMQ_DIR="$$generated/rabbitmq" GENERATED_DIR="$$generated/terraform"; \
 	selectors="-l desire-store-client=true -l name=redis -l name=hyperfleet-applier"; \
 	extract_doc() { \
@@ -824,10 +821,10 @@ validate-desire-delivery: check-helm ## Validate the desire delivery render (rem
 			$$0 == "  name: " name { keep = 1 } \
 			END { if (keep) printf "%s", doc }'; \
 	}; \
-	NAMESPACE=hf-validate RUN_ID=hf-validate OIDC_ISSUER_MODE=mock OIDC_ISSUER_URL= OIDC_JWKS_URL= helmfile -f helmfile/helmfile.yaml.gotmpl -e e2e-kind repos >/dev/null \
+	NAMESPACE=$$namespace_prefix RUN_ID=$$namespace_prefix OIDC_ISSUER_MODE=mock OIDC_ISSUER_URL= OIDC_JWKS_URL= helmfile -f helmfile/helmfile.yaml.gotmpl -e e2e-kind repos >/dev/null \
 		|| { echo "ERROR: Helmfile desire delivery repository setup failed"; exit 1; }; \
 	for env in e2e-kind e2e-gcp kind gcp; do \
-		ns=hf-validate-$$env; \
+		ns=$$namespace_prefix-$$env; \
 		mode=mock; url=; \
 		if [ "$$env" = gcp ]; then mode=external; url=https://issuer.invalid; fi; \
 		export NAMESPACE=$$ns RUN_ID=$$ns OIDC_ISSUER_MODE=$$mode OIDC_ISSUER_URL=$$url OIDC_JWKS_URL=; \
@@ -849,12 +846,17 @@ validate-desire-delivery: check-helm ## Validate the desire delivery render (rem
 		done; \
 	done
 
+.PHONY: validate-fixture-entities
+validate-fixture-entities: check-helmfile ## Validate E2E fixture entities, Sentinels and non-E2E isolation
+	@./scripts/validate-fixture-entities.sh
+
 .PHONY: ci-dry-run
 ci-dry-run: ci-validate ## Ci dry-run: ci-validate + test GKE policy modes + validate chart rendering
 	$(MAKE) test-terraform-network-policy
 	$(MAKE) validate-network-policies
 	$(MAKE) validate-namespace-cleaner
 	$(MAKE) validate-desire-delivery
+	$(MAKE) validate-fixture-entities
 
 .PHONY: health-check-desire-delivery
 health-check-desire-delivery: check-kubectl ## Verify desire delivery components (Redis + applier)
